@@ -32,7 +32,7 @@ on-chain.
   producer. The contract every client must satisfy.
 - **[`go/`](go/)** — client #1 (reference). Pure Go standard library, **zero
   external dependencies** (hand-written Keccak-256).
-- **[`ts/`](ts/)** — client #2. TypeScript, runs on Node ≥22.6 with no runtime
+- **[`ts/`](ts/)** — client #2. TypeScript, runs on Node ≥24 with no runtime
   dependencies (hand-written Keccak, Node stdlib sha256); typecheck-only devDeps.
   `rust/`, `python/` follow.
 
@@ -68,17 +68,17 @@ head                0x9e41f7c2c549770465885a46b26fa1140a52bc6b76ad84674915bfea47
 
 ## Quick start (TypeScript)
 
-Runs on Node ≥22.6 with no install (native TypeScript via `--experimental-strip-types`):
+Runs on Node ≥24 with no install (native TypeScript — type stripping is on by default):
 
 ```sh
 cd ts
 
 # consensus suite
-node --test --experimental-strip-types 'test/*.test.ts'
+node --test 'test/*.test.ts'
 
 # or the CLI:
-node --experimental-strip-types cmd/rso-verify.ts selftest
-node --experimental-strip-types cmd/rso-verify.ts anchors
+node cmd/rso-verify.ts selftest
+node cmd/rso-verify.ts anchors
 
 # optional typecheck (the only devDeps are typescript + @types/node):
 npm install && npm run typecheck
@@ -111,7 +111,7 @@ A client conforms iff it reproduces every value in `vectors/` — see
 | client | status |
 |---|---|
 | `go/` | ✅ reference — full suite passing |
-| `ts/` | ✅ full suite passing (Node ≥22.6, zero runtime deps) |
+| `ts/` | ✅ full suite passing (Node ≥24, zero runtime deps) |
 | `rust/` | planned |
 | `python/` | planned (clean-room — distinct from the producer's pipeline) |
 

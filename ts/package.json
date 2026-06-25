@@ -5,20 +5,20 @@
   "type": "module",
   "license": "MIT",
   "engines": {
-    "node": ">=22.6"
+    "node": ">=24"
   },
   "exports": {
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "node --test --experimental-strip-types 'test/*.test.ts'",
+    "test": "node --test 'test/*.test.ts'",
     "typecheck": "tsc --noEmit",
-    "selftest": "node --experimental-strip-types cmd/rso-verify.ts selftest",
-    "spine": "node --experimental-strip-types cmd/rso-verify.ts spine",
-    "anchors": "node --experimental-strip-types cmd/rso-verify.ts anchors"
+    "selftest": "node cmd/rso-verify.ts selftest",
+    "spine": "node cmd/rso-verify.ts spine",
+    "anchors": "node cmd/rso-verify.ts anchors"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
-    "@types/node": "^22.0.0"
+    "typescript": "^5.6.0",
+    "@types/node": "^24.0.0"
   }
 }

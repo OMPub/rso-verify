@@ -25,3 +25,24 @@ jobs:
       - name: anchors (replay manifest)
         working-directory: go
         run: go run ./cmd/rso-verify anchors ../vectors
+
+  ts:
+    name: ts client (consensus suite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: install devDeps (typecheck only)
+        working-directory: ts
+        run: npm install --no-audit --no-fund
+      - name: typecheck
+        working-directory: ts
+        run: npm run typecheck
+      - name: test
+        working-directory: ts
+        run: npm test
+      - name: anchors (replay manifest)
+        working-directory: ts
+        run: node --experimental-strip-types cmd/rso-verify.ts anchors ../vectors

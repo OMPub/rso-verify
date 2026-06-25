@@ -3,6 +3,11 @@
 *.test
 *.out
 
+# Node / TypeScript
+node_modules/
+dist/
+*.tsbuildinfo
+
 # editors / OS
 .DS_Store
 *.swp

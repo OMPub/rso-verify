@@ -10,7 +10,7 @@ committed on Ethereum.
 It is written for **re-implementers**. Like Ethereum's
 [execution-specs](https://github.com/ethereum/execution-specs), this English spec
 plus the language-neutral [`vectors/`](vectors/) suite defines the protocol; the
-clients in [`go/`](go/), `js/`, `rust/`, `python/` are independent implementations
+clients in [`go/`](go/), [`ts/`](ts/), `rust/`, `python/` are independent implementations
 that must all reproduce the vectors byte-for-byte. **No producer/pipeline code
 lives here** — only the spec, the vectors, and clean-room verifiers.
 
@@ -69,7 +69,14 @@ source-independent statement about the orbit.
 
 The shortest plain-decimal form of a terminating decimal:
 
-1. Strip ASCII whitespace, then a trailing `\` (legacy artifact), then whitespace.
+1. Strip ASCII whitespace — **exactly** the bytes `0x09 0x0A 0x0B 0x0C 0x0D 0x20`
+   (`\t \n \v \f \r` and space), **never** Unicode whitespace (NBSP U+00A0, NEL
+   U+0085, BOM U+FEFF, the C0 information separators U+001C–001F, ideographic space
+   U+3000, …). Then strip a trailing `\` (legacy artifact), then ASCII whitespace
+   again. This narrow, language-neutral rule is load-bearing: `str.strip()` (Python),
+   `unicode.IsSpace` (Go), and `String.trim()` (JS) each strip a *different* exotic
+   set, so a client that defers to its language's trim **will** diverge. Anything
+   non-ASCII surviving the strip is rejected fail-closed by the ASCII-digit guard.
 2. Capture sign: one leading `-` → negative; a leading `+` is dropped; no other
    signs are permitted.
 3. If `e`/`E` is present, expand to plain decimal by shifting the point per the
@@ -138,10 +145,17 @@ Worked: ISS `26172.76913116` → `2026-06-21T18:27:32.932224`; Sputnik
 
 ### 2.4 `NORAD_CAT_ID` — base-10 integer string `^(0|[1-9][0-9]*)$`
 
-Plain numeric (`<100000` or any all-digit OMM) → `int()`. **Alpha-5** (5-char
-satnum, letter first) → `ALPHA5.index(first)·10000 + int(last4)` (I/O skipped;
-`T0000` → `270000`, `Z9999` → `339999`). Validate with an **ASCII-only** digit
-test, never Unicode `isdigit`.
+**Bounded and ASCII-strict.** A plain numeric id is all ASCII digits with **at
+most 9 significant digits** (`≤ 999,999,999`, the documented OMM maximum; leading
+zeros allowed and stripped). An **Alpha-5** id is **exactly 5 characters**: an
+ASCII letter followed by 4 ASCII digits → `ALPHA5.index(first)·10000 + int(last4)`
+(`I`/`O` excluded; `T0000` → `270000`, `Z9999` → `339999`, so `≤ 339,999`). The
+leading character is ASCII-uppercased **only** (`a`–`z` → `A`–`Z`; never Unicode
+case-folding — e.g. long-s `ſ` must **not** fold to `S`). Validate digits with an
+**ASCII-only** test, never Unicode `isdigit`. Both bounds keep the value below
+`2^53`, so a `Number`/`int` decode is exact in every language; anything larger,
+non-ASCII, or mis-shaped is non-canonical → **reject** (a 17-digit "catalog
+number" is corruption, not a satellite).
 
 ### 2.5 `core_record` from a TLE pair
 
@@ -284,6 +298,9 @@ A client is conforming iff, against this repo's `vectors/`, it:
 - passes the on-chain Sepolia `blockHash` self-check (§3);
 - reproduces every `vectors/decode.json` and `vectors/records.json` value,
   including the ISS `contentHash` `d21f9317…36a5b3f1`;
+- **fail-closed rejects** every entry of `vectors/decode.json → reject` (exotic
+  whitespace, non-ASCII digits/letters, out-of-range or mis-shaped satnums, …) —
+  these guard against the language-specific trim/parse divergences in §2.2/§2.4;
 - reproduces `vectors/merkle.json` (root + inclusion proof);
 - replays `vectors/daily_manifest.txt` into the §5 anchors and matches all 819
   entries of `vectors/month_roots.json`.

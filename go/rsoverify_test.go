@@ -98,6 +98,37 @@ func TestDecodeVectors(t *testing.T) {
 	}
 }
 
+func TestRejectVectors(t *testing.T) {
+	var d struct {
+		Reject []struct {
+			Fn   string   `json:"fn"`
+			Args []string `json:"args"`
+		} `json:"reject"`
+	}
+	readJSON(t, "decode.json", &d)
+	if len(d.Reject) == 0 {
+		t.Fatal("no reject vectors loaded")
+	}
+	for _, r := range d.Reject {
+		var err error
+		switch r.Fn {
+		case "canon_decimal":
+			_, err = CanonDecimal(r.Args[0])
+		case "decode_assumed_exp":
+			_, err = DecodeAssumedExp(r.Args[0])
+		case "decode_satnum":
+			_, err = DecodeSatnum(r.Args[0])
+		case "epoch_from_tle":
+			_, err = EpochFromTLE(r.Args[0])
+		default:
+			t.Fatalf("unknown fn %q in reject vectors", r.Fn)
+		}
+		if err == nil {
+			t.Errorf("expected %s(%q) to reject, but it succeeded", r.Fn, r.Args[0])
+		}
+	}
+}
+
 func TestRecordVectors(t *testing.T) {
 	var recs []struct {
 		Name        string `json:"name"`

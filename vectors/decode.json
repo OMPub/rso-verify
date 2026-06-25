@@ -61,6 +61,18 @@
   [
    "0.0004499",
    "0.0004499"
+  ],
+  [
+   "5 ",
+   "5"
+  ],
+  [
+   "5\\",
+   "5"
+  ],
+  [
+   "\t-0.04400\t",
+   "-0.044"
   ]
  ],
  "decode_satnum": [
@@ -83,6 +95,14 @@
   [
    "25544",
    25544
+  ],
+  [
+   " 25544 ",
+   25544
+  ],
+  [
+   "00025544",
+   25544
   ]
  ],
  "epoch_from_tle": [
@@ -101,5 +121,157 @@
  ],
  "off_grid_omm_rejects": [
   "2026-06-21T18:27:32.932225"
+ ],
+ "reject": [
+  {
+   "fn": "canon_decimal",
+   "args": [
+    "5\u001c"
+   ]
+  },
+  {
+   "fn": "canon_decimal",
+   "args": [
+    "5\u0085"
+   ]
+  },
+  {
+   "fn": "canon_decimal",
+   "args": [
+    "\u00a05"
+   ]
+  },
+  {
+   "fn": "canon_decimal",
+   "args": [
+    "5\ufeff"
+   ]
+  },
+  {
+   "fn": "canon_decimal",
+   "args": [
+    "\u30005"
+   ]
+  },
+  {
+   "fn": "canon_decimal",
+   "args": [
+    "1_000"
+   ]
+  },
+  {
+   "fn": "canon_decimal",
+   "args": [
+    "0x10"
+   ]
+  },
+  {
+   "fn": "canon_decimal",
+   "args": [
+    "Infinity"
+   ]
+  },
+  {
+   "fn": "canon_decimal",
+   "args": [
+    "1e"
+   ]
+  },
+  {
+   "fn": "canon_decimal",
+   "args": [
+    "1..2"
+   ]
+  },
+  {
+   "fn": "canon_decimal",
+   "args": [
+    "."
+   ]
+  },
+  {
+   "fn": "canon_decimal",
+   "args": [
+    "+"
+   ]
+  },
+  {
+   "fn": "canon_decimal",
+   "args": [
+    ""
+   ]
+  },
+  {
+   "fn": "decode_assumed_exp",
+   "args": [
+    "+17028-3\u0085"
+   ]
+  },
+  {
+   "fn": "decode_assumed_exp",
+   "args": [
+    "+028410\ufeff"
+   ]
+  },
+  {
+   "fn": "decode_assumed_exp",
+   "args": [
+    "+028410\u001c"
+   ]
+  },
+  {
+   "fn": "decode_satnum",
+   "args": [
+    "9007199254740993"
+   ]
+  },
+  {
+   "fn": "decode_satnum",
+   "args": [
+    "12345678901234567890"
+   ]
+  },
+  {
+   "fn": "decode_satnum",
+   "args": [
+    "\u017f0000"
+   ]
+  },
+  {
+   "fn": "decode_satnum",
+   "args": [
+    "T999999"
+   ]
+  },
+  {
+   "fn": "decode_satnum",
+   "args": [
+    "25544\u001c"
+   ]
+  },
+  {
+   "fn": "decode_satnum",
+   "args": [
+    "I0001"
+   ]
+  },
+  {
+   "fn": "decode_satnum",
+   "args": [
+    "O0001"
+   ]
+  },
+  {
+   "fn": "epoch_from_tle",
+   "args": [
+    "1 25544U 98067A   \ufeff6172.769131  .00016717  00000-0  17028-3 0  9990"
+   ]
+  },
+  {
+   "fn": "epoch_from_tle",
+   "args": [
+    "1 25544U 98067A   26172.769\u00a03116  .00016717  00000-0  17028-3 0 9990"
+   ]
+  }
  ]
 }

@@ -101,6 +101,10 @@ func runSelftest(dir string) error {
 		CanonDecimal     [][2]interface{} `json:"canon_decimal"`
 		DecodeSatnum     [][2]interface{} `json:"decode_satnum"`
 		EpochFromTLE     [][2]interface{} `json:"epoch_from_tle"`
+		Reject           []struct {
+			Fn   string   `json:"fn"`
+			Args []string `json:"args"`
+		} `json:"reject"`
 	}
 	if err := readJSON(filepath.Join(dir, "decode.json"), &dec); err != nil {
 		return err
@@ -136,6 +140,26 @@ func runSelftest(dir string) error {
 	}
 	fmt.Printf("decode vectors: %d assumed-exp, %d canon-decimal, %d satnum, %d epoch  OK\n",
 		len(dec.DecodeAssumedExp), len(dec.CanonDecimal), len(dec.DecodeSatnum), len(dec.EpochFromTLE))
+
+	for _, r := range dec.Reject {
+		var e error
+		switch r.Fn {
+		case "canon_decimal":
+			_, e = rv.CanonDecimal(r.Args[0])
+		case "decode_assumed_exp":
+			_, e = rv.DecodeAssumedExp(r.Args[0])
+		case "decode_satnum":
+			_, e = rv.DecodeSatnum(r.Args[0])
+		case "epoch_from_tle":
+			_, e = rv.EpochFromTLE(r.Args[0])
+		default:
+			return fmt.Errorf("unknown reject fn %q", r.Fn)
+		}
+		if e == nil {
+			return fmt.Errorf("reject vector %s(%q) was NOT rejected", r.Fn, r.Args[0])
+		}
+	}
+	fmt.Printf("reject vectors: %d non-canonical inputs all fail-closed  OK\n", len(dec.Reject))
 
 	// full record → canonical bytes + contentHash
 	var recs []struct {

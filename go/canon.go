@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 )
 
 // Alpha5: index of the first satnum char IS the high-digit value; I and O skipped.
@@ -74,7 +73,15 @@ func signedIntStr(s string) bool {
 	return asciiDigits(s)
 }
 
-func rstripSpace(s string) string { return strings.TrimRightFunc(s, unicode.IsSpace) }
+// Whitespace is ASCII-only by spec (SPEC §2.2): exactly \t\n\v\f\r and space.
+// Unicode whitespace (NBSP, NEL, BOM, the C0 information separators, ideographic
+// space, …) is non-canonical and left in place so the ascii-digit guards reject
+// it fail-closed — uniform across every client. NOT strings.TrimSpace /
+// unicode.IsSpace, which strip a different (and inter-language-divergent) set.
+const asciiWS = " \t\n\v\f\r"
+
+func stripASCII(s string) string  { return strings.Trim(s, asciiWS) }
+func rstripASCII(s string) string { return strings.TrimRight(s, asciiWS) }
 
 // applyExponent shifts the decimal point of an unsigned decimal string by exp.
 func applyExponent(mantissa string, exp int) string {
@@ -96,9 +103,9 @@ func applyExponent(mantissa string, exp int) string {
 // CanonDecimal is the shared numeric tokenizer (SPEC §2.2): the shortest plain-
 // decimal form of a terminating decimal string.
 func CanonDecimal(s string) (string, error) {
-	s = strings.TrimSpace(s)
+	s = stripASCII(s)
 	s = strings.TrimRight(s, "\\")
-	s = strings.TrimSpace(s)
+	s = stripASCII(s)
 	if s == "" {
 		return "", fmt.Errorf("empty decimal field")
 	}
@@ -162,11 +169,11 @@ func DecodeAssumedExp(field string) (string, error) {
 		if c0 == '-' {
 			msign = "-"
 		}
-		rest = rstripSpace(field[1:])
+		rest = rstripASCII(field[1:])
 	case c0 == ' ':
-		rest = rstripSpace(field[1:])
+		rest = rstripASCII(field[1:])
 	case c0 >= '0' && c0 <= '9':
-		rest = rstripSpace(field)
+		rest = rstripASCII(field)
 	default:
 		return "", fmt.Errorf("malformed assumed-exponent field: %q", field)
 	}
@@ -197,21 +204,39 @@ func DecodeAssumedExp(field string) (string, error) {
 	return CanonDecimal(msign + intPart + "." + mantDigits[len(mantDigits)-5:] + "e" + strconv.Itoa(ev))
 }
 
-// DecodeSatnum decodes an Alpha-5 / plain satnum field to its integer value.
+// DecodeSatnum decodes an Alpha-5 / plain satnum field to its integer value
+// (SPEC §2.4). Bounded + ASCII-strict: a plain numeric id is ≤ 9 digits
+// (≤ 999,999,999); an Alpha-5 id is EXACTLY 5 chars (ASCII letter + 4 ASCII
+// digits, ≤ 339,999); the leading char is ASCII-uppercased only (a–z → A–Z, never
+// Unicode case-folding). Larger or non-ASCII inputs are non-canonical → fail closed.
 func DecodeSatnum(field string) (int, error) {
-	field = strings.TrimSpace(field)
+	field = stripASCII(field)
 	if field == "" {
 		return 0, fmt.Errorf("empty satnum")
 	}
-	c0 := unicode.ToUpper(rune(field[0]))
+	c0 := field[0]
 	if c0 >= '0' && c0 <= '9' {
 		if !asciiDigits(field) {
 			return 0, fmt.Errorf("bad numeric satnum: %q", field)
 		}
-		return strconv.Atoi(field)
+		sig := strings.TrimLeft(field, "0")
+		if sig == "" {
+			sig = "0"
+		}
+		if len(sig) > 9 { // ≤ 9-digit OMM max
+			return 0, fmt.Errorf("numeric satnum out of range: %q", field)
+		}
+		return strconv.Atoi(sig)
 	}
-	idx := strings.IndexRune(alpha5, c0)
-	if idx < 0 {
+	if len(field) != 5 { // Alpha-5 is exactly 5 chars
+		return 0, fmt.Errorf("bad Alpha-5 satnum length: %q", field)
+	}
+	upper := c0
+	if upper >= 'a' && upper <= 'z' {
+		upper -= 32 // ASCII uppercase only
+	}
+	idx := strings.IndexByte(alpha5, upper)
+	if idx < 10 { // must be a letter (index ≥ 10), not a digit or non-ASCII
 		return 0, fmt.Errorf("bad Alpha-5 leading char: %q", field)
 	}
 	rest := field[1:]
@@ -287,7 +312,7 @@ func renderEpoch(year, doy, usecOfDay int) (string, error) {
 
 // EpochFromTLE renders the canonical EPOCH token from a TLE line-1 YYDDD.FFFFFFFF.
 func EpochFromTLE(line1 string) (string, error) {
-	raw := strings.TrimSpace(pySlice(line1, 18, 32))
+	raw := stripASCII(pySlice(line1, 18, 32))
 	if len(raw) < 2 || !asciiDigits(raw[:2]) {
 		return "", fmt.Errorf("non-ASCII/invalid epoch year: %q", raw)
 	}
@@ -374,7 +399,7 @@ func CoreRecordFromTLE(line1, line2 string) (CoreRecord, error) {
 	if r.RaOfAscNode, err = CanonDecimal(pySlice(line2, 17, 25)); err != nil {
 		return r, err
 	}
-	if r.Eccentricity, err = CanonDecimal("0." + strings.TrimSpace(pySlice(line2, 26, 33))); err != nil {
+	if r.Eccentricity, err = CanonDecimal("0." + stripASCII(pySlice(line2, 26, 33))); err != nil {
 		return r, err
 	}
 	if r.ArgOfPericenter, err = CanonDecimal(pySlice(line2, 34, 42)); err != nil {

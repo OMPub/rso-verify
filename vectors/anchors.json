@@ -1,0 +1,19 @@
+{
+ "schema": "rso-core-omm-v1",
+ "docChainId": "0x6011620b5a3faa23f8078c2af0bb1a87bb85a68f784abdf3dbae67939c399bea",
+ "doc_block_typehash": "0xb84212102d711af6fc7ae9fa3e37753befb8b25762a552631b0e9ff9e8d07894",
+ "days": 24926,
+ "months": 819,
+ "genesis": {
+  "day": "1957-10-04",
+  "blockHash": "0xac994f034640eb73c4367346b9a47c1a599458b840dec599d38a288595936fc0"
+ },
+ "weld_value_2025_12_31": "0x1bc2b0f3495fd3ecdc3e8ae271a33c2cc0ea6ac0d1c682adc2825638e0a5596b",
+ "onchain_sepolia_genesis_selfcheck": {
+  "doc_ref": 20260420000000,
+  "parent": "0000000000000000000000000000000000000000000000000000000000000000",
+  "content": "1838a06696902f7397d78d906c4bd9f5e9d9e372725ccbf4629bbd377231a740",
+  "block": "e651a58398fe906551be2f4d2ec39bace608e7aa60f3c8c30cd276aac96e103e"
+ },
+ "spine_head_blockHash": "0x9e41f7c2c549770465885a46b26fa1140a52bc6b76ad84674915bfea4769e4c5"
+}

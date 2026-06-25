@@ -1,0 +1,42 @@
+[
+ {
+  "day": "1957-10-04",
+  "docRef": 19571004000000,
+  "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "contentHash": "0x9fcce0a007eed2a2277ca41237b4070e944fd90a142631146c1c12eb5e7d91ac",
+  "recordCount": 1,
+  "blockHash": "0xac994f034640eb73c4367346b9a47c1a599458b840dec599d38a288595936fc0"
+ },
+ {
+  "day": "1957-10-05",
+  "docRef": 19571005000000,
+  "parentHash": "0xac994f034640eb73c4367346b9a47c1a599458b840dec599d38a288595936fc0",
+  "contentHash": "0x9fcce0a007eed2a2277ca41237b4070e944fd90a142631146c1c12eb5e7d91ac",
+  "recordCount": 1,
+  "blockHash": "0xae603a8ee6e99723d8664e51d5e084240726bbb28a53236543fe993b878d6220"
+ },
+ {
+  "day": "1957-10-06",
+  "docRef": 19571006000000,
+  "parentHash": "0xae603a8ee6e99723d8664e51d5e084240726bbb28a53236543fe993b878d6220",
+  "contentHash": "0x9fcce0a007eed2a2277ca41237b4070e944fd90a142631146c1c12eb5e7d91ac",
+  "recordCount": 1,
+  "blockHash": "0x413cfed8eeef0a8250f5ed059713e58dd8f12c822cf59a4da0fd7157e2c062d9"
+ },
+ {
+  "day": "1958-01-12",
+  "docRef": 19580112000000,
+  "parentHash": "0xbe641fda77d4867135358d6bae72010ce71757ef4aa96c81177f7c1812d8acf7",
+  "contentHash": "0x0c95b16f8715597bb68ce68ba6d099b761ed939c112852b49b3ffb915044cea0",
+  "recordCount": 2,
+  "blockHash": "0x19d6c3df01bedbb1a531140dfbb8e42afc024b9ba14eb2714788bd7fead7cde5"
+ },
+ {
+  "day": "2025-12-31",
+  "docRef": 20251231000000,
+  "parentHash": "0xf48bdaef9a6d652aa7a85dd6d032eff93cad6c662171178604f7b3a36ef1e0e1",
+  "contentHash": "0xd4c931dfe9b4c2efaa58dc894f139dc2cb49b0a9a9d235cb218070b4747040b1",
+  "recordCount": 65373,
+  "blockHash": "0x1bc2b0f3495fd3ecdc3e8ae271a33c2cc0ea6ac0d1c682adc2825638e0a5596b"
+ }
+]

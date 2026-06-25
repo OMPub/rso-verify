@@ -1,0 +1,27 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  go:
+    name: go client (consensus suite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+      - name: gofmt
+        working-directory: go
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; echo 'run gofmt -w'; exit 1; }
+      - name: vet
+        working-directory: go
+        run: go vet ./...
+      - name: test
+        working-directory: go
+        run: go test ./...
+      - name: anchors (replay manifest)
+        working-directory: go
+        run: go run ./cmd/rso-verify anchors ../vectors

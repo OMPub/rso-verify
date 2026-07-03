@@ -90,14 +90,15 @@ Same anchors, reproduced independently by the TypeScript implementation.
 
 | file | what it pins |
 |---|---|
-| `daily_manifest.txt` | every day `YYYY-MM-DD  contentHash  recordCount` (24,926 lines) — replayed into the anchors |
+| `daily_manifest.txt` | every day `YYYY-MM-DD contentHash recordCount` (24,926 lines, single-space separators — SPEC §5 grammar) — replayed into the anchors |
 | `month_roots.json` | the 819 monthly Merkle roots + their block hashes (1957-10 → 2025-12) |
 | `anchors.json` | genesis / weld / spine-head, counts, `docChainId`, typehash, and the live on-chain Sepolia self-check |
 | `blockhashes.json` | sampled day-level `blockHash` vectors (genesis, early days, the 2025-12-31 weld) |
 | `decode.json` | unit vectors for `decode_assumed_exp`, `canon_decimal`, `decode_satnum`, `epoch_from_tle` |
-| `records.json` | a full TLE → 11-field `core_record` → canonical bytes → `contentHash` (ISS) |
-| `merkle.json` | a small deterministic Merkle root + inclusion proof |
-| `sources.sha256` | SHA-256 of every upstream source file (Space-Track annual zips, McDowell) for provenance |
+| `records.json` | full TLE → 11-field `core_record` → canonical bytes → `contentHash` (modern ISS + a legacy column-shifted record) |
+| `merkle.json` | Merkle roots + proofs: the 5-leaf tree, single/two/seven-leaf shapes, the promoted-leaf short proof, and NEGATIVE cases (corrupted proof, zero leaves) |
+| `catalogs.json` | day-catalog serialization: empty day, integer NORAD sort, duplicate-NORAD hard error |
+| `sources.sha256` | SHA-256 of every upstream source file (Space-Track annual zips, McDowell) for provenance (informative — not consumed by the suites) |
 
 ## Conformance
 

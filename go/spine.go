@@ -42,7 +42,49 @@ type SpineResult struct {
 	MonthResults []MonthResult
 }
 
-// ParseManifest reads "YYYY-MM-DD <contentHash> <recordCount>" lines.
+// daysInMonth for a proleptic-Gregorian calendar-validity check (SPEC §1.1).
+func daysInMonth(y, m int) int {
+	if m == 2 && isLeap(y) {
+		return 29
+	}
+	return monthLengths[m-1]
+}
+
+// nextDay advances (y, m, d) by exactly one calendar day.
+func nextDay(y, m, d int) (int, int, int) {
+	d++
+	if d > daysInMonth(y, m) {
+		d = 1
+		m++
+		if m > 12 {
+			m = 1
+			y++
+		}
+	}
+	return y, m, d
+}
+
+func asciiDigitsExactly(s string, n int) bool {
+	return len(s) == n && asciiDigits(s)
+}
+
+func lowerHex64(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for i := 0; i < 64; i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
+// ParseManifest reads "YYYY-MM-DD <contentHash> <recordCount>" lines under the
+// SPEC §5 grammar: LF lines, exactly two single-space separators, bare lowercase
+// hex, calendar-valid dates advancing by exactly one day, recordCount canonical.
+// Reject anything else — a malformed manifest MUST never yield anchors.
 func ParseManifest(path string) ([]ManifestDay, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -55,26 +97,56 @@ func ParseManifest(path string) ([]ManifestDay, error) {
 	ln := 0
 	for sc.Scan() {
 		ln++
-		line := strings.TrimSpace(sc.Text())
+		line := sc.Text()
 		if line == "" {
 			continue
 		}
-		fields := strings.Fields(line)
+		if len(line) > 96 {
+			return nil, fmt.Errorf("manifest line %d: longer than 96 bytes", ln)
+		}
+		fields := strings.Split(line, " ")
 		if len(fields) != 3 {
-			return nil, fmt.Errorf("manifest line %d: want 3 fields, got %d", ln, len(fields))
+			return nil, fmt.Errorf("manifest line %d: want 3 single-space fields, got %d", ln, len(fields))
 		}
-		dparts := strings.Split(fields[0], "-")
-		if len(dparts) != 3 {
-			return nil, fmt.Errorf("manifest line %d: bad day %q", ln, fields[0])
+		date, hash, count := fields[0], fields[1], fields[2]
+		if len(date) != 10 || date[4] != '-' || date[7] != '-' ||
+			!asciiDigitsExactly(date[0:4], 4) || !asciiDigitsExactly(date[5:7], 2) || !asciiDigitsExactly(date[8:10], 2) {
+			return nil, fmt.Errorf("manifest line %d: bad date %q", ln, date)
 		}
-		y, _ := strconv.Atoi(dparts[0])
-		m, _ := strconv.Atoi(dparts[1])
-		d, _ := strconv.Atoi(dparts[2])
-		ch, err := Parse32(fields[1])
+		y, err := strconv.Atoi(date[0:4])
+		if err != nil {
+			return nil, fmt.Errorf("manifest line %d: bad year: %w", ln, err)
+		}
+		m, err := strconv.Atoi(date[5:7])
+		if err != nil {
+			return nil, fmt.Errorf("manifest line %d: bad month: %w", ln, err)
+		}
+		d, err := strconv.Atoi(date[8:10])
+		if err != nil {
+			return nil, fmt.Errorf("manifest line %d: bad day: %w", ln, err)
+		}
+		if m < 1 || m > 12 || d < 1 || d > daysInMonth(y, m) {
+			return nil, fmt.Errorf("manifest line %d: %q is not a calendar date", ln, date)
+		}
+		if len(days) > 0 {
+			p := days[len(days)-1]
+			ey, em, ed := nextDay(p.Year, p.Month, p.Day)
+			if y != ey || m != em || d != ed {
+				return nil, fmt.Errorf("manifest line %d: %q does not follow %04d-%02d-%02d by exactly one day",
+					ln, date, p.Year, p.Month, p.Day)
+			}
+		}
+		if !lowerHex64(hash) {
+			return nil, fmt.Errorf("manifest line %d: contentHash is not 64 bare lowercase hex chars", ln)
+		}
+		ch, err := Parse32(hash)
 		if err != nil {
 			return nil, fmt.Errorf("manifest line %d: bad contentHash: %w", ln, err)
 		}
-		rc, err := strconv.Atoi(fields[2])
+		if !asciiDigits(count) || (len(count) > 1 && count[0] == '0') || len(count) > 15 {
+			return nil, fmt.Errorf("manifest line %d: bad recordCount %q", ln, count)
+		}
+		rc, err := strconv.Atoi(count)
 		if err != nil {
 			return nil, fmt.Errorf("manifest line %d: bad recordCount: %w", ln, err)
 		}

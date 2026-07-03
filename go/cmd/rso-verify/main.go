@@ -69,6 +69,7 @@ func runSelftest(dir string) error {
 	var anchors struct {
 		DocChainID       string `json:"docChainId"`
 		DocBlockTypehash string `json:"doc_block_typehash"`
+		KeccakEmpty      string `json:"keccak_empty"`
 		OnchainSelfcheck struct {
 			DocRef  uint64 `json:"doc_ref"`
 			Parent  string `json:"parent"`
@@ -86,9 +87,20 @@ func runSelftest(dir string) error {
 		return fmt.Errorf("docChainId mismatch vs anchors.json")
 	}
 
+	// keccak-256 padding self-check from the vectors (not hardcoded in clients only)
+	if anchors.KeccakEmpty != "" && "0x"+rv.Hex32(rv.Keccak256(nil)) != anchors.KeccakEmpty {
+		return fmt.Errorf("keccak256(\"\") mismatch vs anchors.json keccak_empty")
+	}
+
 	// real on-chain Sepolia genesis block: blockHash must match the live value
-	pc, _ := rv.Parse32(anchors.OnchainSelfcheck.Parent)
-	cc, _ := rv.Parse32(anchors.OnchainSelfcheck.Content)
+	pc, err := rv.Parse32(anchors.OnchainSelfcheck.Parent)
+	if err != nil {
+		return fmt.Errorf("anchors.json selfcheck parent: %w", err)
+	}
+	cc, err := rv.Parse32(anchors.OnchainSelfcheck.Content)
+	if err != nil {
+		return fmt.Errorf("anchors.json selfcheck content: %w", err)
+	}
 	got := rv.Hex32(rv.BlockHash(anchors.OnchainSelfcheck.DocRef, pc, cc))
 	if got != strings.TrimPrefix(anchors.OnchainSelfcheck.Block, "0x") {
 		return fmt.Errorf("on-chain Sepolia self-check FAILED: %s != %s", got, anchors.OnchainSelfcheck.Block)
@@ -108,6 +120,12 @@ func runSelftest(dir string) error {
 	}
 	if err := readJSON(filepath.Join(dir, "decode.json"), &dec); err != nil {
 		return err
+	}
+	// SPEC §6: a missing or empty vector class is a conformance FAILURE — a suite
+	// that silently skips an absent array proves nothing.
+	if len(dec.DecodeAssumedExp) == 0 || len(dec.CanonDecimal) == 0 ||
+		len(dec.DecodeSatnum) == 0 || len(dec.EpochFromTLE) == 0 || len(dec.Reject) == 0 {
+		return fmt.Errorf("decode.json: one or more vector classes are missing or empty")
 	}
 	for _, v := range dec.DecodeAssumedExp {
 		in, want := v[0].(string), v[1].(string)
@@ -172,6 +190,9 @@ func runSelftest(dir string) error {
 	if err := readJSON(filepath.Join(dir, "records.json"), &recs); err != nil {
 		return err
 	}
+	if len(recs) == 0 {
+		return fmt.Errorf("records.json: no record vectors")
+	}
 	for _, r := range recs {
 		cr, err := rv.CoreRecordFromTLE(r.Line1, r.Line2)
 		if err != nil {
@@ -190,22 +211,57 @@ func runSelftest(dir string) error {
 		fmt.Printf("record %-26s contentHash %s  OK\n", r.Name, ch)
 	}
 
-	// merkle vector
+	// merkle vectors: 5-leaf root + proof, degenerate shapes, promoted-leaf short
+	// proof, and the NEGATIVE cases (a verifyProof that always returns true must fail here)
 	var mk struct {
-		Leaves []string `json:"leaves"`
-		Root   string   `json:"root"`
-		Index  int      `json:"proof_index"`
-		Proof  []string `json:"proof"`
+		Leaves     []string `json:"leaves"`
+		Root       string   `json:"root"`
+		Index      int      `json:"proof_index"`
+		Proof      []string `json:"proof"`
+		SingleLeaf struct {
+			Leaves []string `json:"leaves"`
+			Root   string   `json:"root"`
+		} `json:"single_leaf"`
+		TwoLeaves struct {
+			Leaves []string `json:"leaves"`
+			Root   string   `json:"root"`
+		} `json:"two_leaves"`
+		PromotedProof struct {
+			Index int      `json:"proof_index"`
+			Proof []string `json:"proof"`
+		} `json:"promoted_leaf_proof"`
+		SevenLeaves struct {
+			Root string `json:"root"`
+		} `json:"seven_leaves_root"`
+		Reject []struct {
+			Comment   string   `json:"comment"`
+			Index     int      `json:"proof_index"`
+			Proof     []string `json:"proof"`
+			Leaves    []string `json:"leaves"`
+			MustFalse bool     `json:"must_verify_false"`
+			MustError bool     `json:"must_error"`
+		} `json:"reject"`
 	}
 	if err := readJSON(filepath.Join(dir, "merkle.json"), &mk); err != nil {
 		return err
 	}
-	var err error
-	leaves := make([][32]byte, len(mk.Leaves))
-	for i, h := range mk.Leaves {
-		if leaves[i], err = rv.Parse32(h); err != nil {
-			return err
+	if len(mk.Leaves) == 0 || len(mk.SingleLeaf.Leaves) != 1 || len(mk.TwoLeaves.Leaves) != 2 ||
+		len(mk.PromotedProof.Proof) == 0 || mk.SevenLeaves.Root == "" || len(mk.Reject) == 0 {
+		return fmt.Errorf("merkle.json: one or more vector classes are missing or empty")
+	}
+	parseAll := func(hs []string) ([][32]byte, error) {
+		out := make([][32]byte, len(hs))
+		var err error
+		for i, h := range hs {
+			if out[i], err = rv.Parse32(h); err != nil {
+				return nil, err
+			}
 		}
+		return out, nil
+	}
+	leaves, err := parseAll(mk.Leaves)
+	if err != nil {
+		return err
 	}
 	root, err := rv.MerkleRoot(leaves)
 	if err != nil {
@@ -214,16 +270,117 @@ func runSelftest(dir string) error {
 	if rv.Hex32(root) != strings.TrimPrefix(mk.Root, "0x") {
 		return fmt.Errorf("merkle root %s want %s", rv.Hex32(root), mk.Root)
 	}
-	proof := make([][32]byte, len(mk.Proof))
-	for i, h := range mk.Proof {
-		if proof[i], err = rv.Parse32(h); err != nil {
-			return err
-		}
+	proof, err := parseAll(mk.Proof)
+	if err != nil {
+		return err
 	}
 	if !rv.VerifyProof(leaves[mk.Index], proof, root) {
 		return fmt.Errorf("merkle proof for index %d did not verify", mk.Index)
 	}
-	fmt.Printf("merkle: root %s + inclusion proof for leaf %d  OK\n", rv.Hex32(root), mk.Index)
+	// single leaf is its own root; two leaves = one combine
+	single, err := parseAll(mk.SingleLeaf.Leaves)
+	if err != nil {
+		return err
+	}
+	if r1, _ := rv.MerkleRoot(single); rv.Hex32(r1) != strings.TrimPrefix(mk.SingleLeaf.Root, "0x") {
+		return fmt.Errorf("single-leaf root mismatch")
+	}
+	two, err := parseAll(mk.TwoLeaves.Leaves)
+	if err != nil {
+		return err
+	}
+	if r2, _ := rv.MerkleRoot(two); rv.Hex32(r2) != strings.TrimPrefix(mk.TwoLeaves.Root, "0x") {
+		return fmt.Errorf("two-leaf root mismatch")
+	}
+	// promoted leaf: sibling-less levels are skipped, so the path is SHORT
+	pp, err := parseAll(mk.PromotedProof.Proof)
+	if err != nil {
+		return err
+	}
+	gotPP, err := rv.MerkleProof(leaves, mk.PromotedProof.Index)
+	if err != nil {
+		return err
+	}
+	if len(gotPP) != len(pp) {
+		return fmt.Errorf("promoted-leaf proof length %d want %d", len(gotPP), len(pp))
+	}
+	for i := range pp {
+		if gotPP[i] != pp[i] {
+			return fmt.Errorf("promoted-leaf proof sibling %d mismatch", i)
+		}
+	}
+	if !rv.VerifyProof(leaves[mk.PromotedProof.Index], pp, root) {
+		return fmt.Errorf("promoted-leaf proof did not verify")
+	}
+	// seven leaves 0x00..01 … 0x00..07: odd counts at two levels
+	seven := make([][32]byte, 7)
+	for i := range seven {
+		seven[i][31] = byte(i + 1)
+	}
+	if r7, _ := rv.MerkleRoot(seven); rv.Hex32(r7) != strings.TrimPrefix(mk.SevenLeaves.Root, "0x") {
+		return fmt.Errorf("seven-leaf root mismatch")
+	}
+	// negative cases
+	for _, rej := range mk.Reject {
+		switch {
+		case rej.MustFalse:
+			bp, err := parseAll(rej.Proof)
+			if err != nil {
+				return err
+			}
+			if rv.VerifyProof(leaves[rej.Index], bp, root) {
+				return fmt.Errorf("merkle reject (%s): corrupted proof VERIFIED", rej.Comment)
+			}
+		case rej.MustError:
+			zl, err := parseAll(rej.Leaves)
+			if err != nil {
+				return err
+			}
+			if _, err := rv.MerkleRoot(zl); err == nil {
+				return fmt.Errorf("merkle reject (%s): expected an error", rej.Comment)
+			}
+		default:
+			return fmt.Errorf("merkle reject (%s): entry declares no expectation", rej.Comment)
+		}
+	}
+	fmt.Printf("merkle: root %s, proofs (incl. promoted short path), degenerate + negative cases  OK\n", rv.Hex32(root))
+
+	// catalog vectors: empty day, multi-record INT sort, duplicate-NORAD reject
+	var cat struct {
+		EmptyDayHash  string `json:"empty_day_contentHash"`
+		UnsortedInput struct {
+			TLEs        [][2]string `json:"tles"`
+			ContentHash string      `json:"contentHash"`
+		} `json:"unsorted_input"`
+		RejectDuplicate struct {
+			RepeatIndex int `json:"tles_repeat_index"`
+		} `json:"reject_duplicate_norad"`
+	}
+	if err := readJSON(filepath.Join(dir, "catalogs.json"), &cat); err != nil {
+		return err
+	}
+	if cat.EmptyDayHash == "" || len(cat.UnsortedInput.TLEs) < 2 {
+		return fmt.Errorf("catalogs.json: vector classes missing or empty")
+	}
+	if ch, err := rv.ContentHash(nil); err != nil || ch != cat.EmptyDayHash {
+		return fmt.Errorf("empty-day contentHash %s (%v) want %s", ch, err, cat.EmptyDayHash)
+	}
+	var catRecs []rv.CoreRecord
+	for _, pair := range cat.UnsortedInput.TLEs {
+		cr, err := rv.CoreRecordFromTLE(pair[0], pair[1])
+		if err != nil {
+			return fmt.Errorf("catalogs.json TLE: %w", err)
+		}
+		catRecs = append(catRecs, cr)
+	}
+	if ch, err := rv.ContentHash(catRecs); err != nil || ch != cat.UnsortedInput.ContentHash {
+		return fmt.Errorf("multi-record contentHash %s (%v) want %s", ch, err, cat.UnsortedInput.ContentHash)
+	}
+	dup := append(append([]rv.CoreRecord{}, catRecs...), catRecs[cat.RejectDuplicate.RepeatIndex])
+	if _, err := rv.ContentHash(dup); err == nil {
+		return fmt.Errorf("duplicate-NORAD catalog was NOT rejected")
+	}
+	fmt.Printf("catalogs: empty day, %d-record int-sorted hash, duplicate reject  OK\n", len(catRecs))
 
 	fmt.Println("\nselftest: ALL OK")
 	return nil
@@ -270,24 +427,30 @@ func runSpine(dir string, compare bool) (rv.SpineResult, error) {
 		{"head", "0x" + rv.Hex32(res.SpineHead), a.SpineHead},
 	}
 
-	// also confirm every recomputed month-root blockHash matches month_roots.json
+	// also confirm every recomputed month-root blockHash matches month_roots.json.
+	// A read/parse failure here MUST be fatal: silently dropping this check row
+	// and still printing ALL MATCH was the audit's worst fail-open finding.
 	var months []struct {
 		MonthRoot string `json:"monthRoot"`
 		BlockHash string `json:"blockHash"`
 	}
-	if err := readJSON(filepath.Join(dir, "month_roots.json"), &months); err == nil {
-		mismatch := 0
-		if len(months) != len(res.MonthResults) {
-			mismatch++
-		} else {
-			for i, m := range res.MonthResults {
-				if "0x"+rv.Hex32(m.BlockHash) != months[i].BlockHash || "0x"+rv.Hex32(m.MonthRoot) != months[i].MonthRoot {
-					mismatch++
-				}
+	if err := readJSON(filepath.Join(dir, "month_roots.json"), &months); err != nil {
+		return res, fmt.Errorf("month_roots.json: %w", err)
+	}
+	if len(months) == 0 {
+		return res, fmt.Errorf("month_roots.json: no month vectors")
+	}
+	mismatch := 0
+	if len(months) != len(res.MonthResults) {
+		mismatch++
+	} else {
+		for i, m := range res.MonthResults {
+			if "0x"+rv.Hex32(m.BlockHash) != months[i].BlockHash || "0x"+rv.Hex32(m.MonthRoot) != months[i].MonthRoot {
+				mismatch++
 			}
 		}
-		checks = append(checks, chk{"month_roots.json (all 819)", fmt.Sprint(mismatch), "0"})
 	}
+	checks = append(checks, chk{"month_roots.json (all 819)", fmt.Sprint(mismatch), "0"})
 
 	fmt.Println()
 	ok := true

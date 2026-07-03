@@ -52,10 +52,12 @@ function isAllZero(s: string): boolean {
   return true;
 }
 
-function signedIntStr(s: string): boolean {
+// The assumed-exponent field's exponent: an optional sign then EXACTLY 1 or 2
+// ASCII digits (SPEC §2.2 shape bounds).
+function validAssumedExpStr(s: string): boolean {
   if (s.length === 0) return false;
   if (s[0] === "+" || s[0] === "-") s = s.slice(1);
-  return asciiDigits(s);
+  return (s.length === 1 || s.length === 2) && asciiDigits(s);
 }
 
 // Whitespace handling is ASCII-only by spec (SPEC §2.2): exactly \t\n\v\f\r and
@@ -110,7 +112,10 @@ export function canonDecimal(input: string): string {
       exp = exp.slice(1);
     }
     if (!asciiDigits(exp) || mant === "") throw new Error(`bad exponent form: '${s}'`);
-    s = applyExponent(mant, Number(esign + exp));
+    const ev = Number(esign + exp);
+    // SPEC §2.2 step 3: |exponent| ≤ 999, the identical bound in every language.
+    if (ev > 999 || ev < -999) throw new Error(`exponent out of bounds: '${s}'`);
+    s = applyExponent(mant, ev);
   }
   if (s.indexOf(".") < 0) s += ".";
   const dot = s.indexOf(".");
@@ -155,7 +160,8 @@ export function decodeAssumedExp(field: string): string {
     mantDigits = rest.slice(0, 5);
     expStr = rest.slice(5);
   }
-  if (mantDigits.length < 5 || !asciiDigits(mantDigits) || !signedIntStr(expStr)) {
+  // SPEC §2.2 shape bounds: mantissa EXACTLY 5 or 6 digits, exponent 1–2 digits.
+  if (mantDigits.length < 5 || mantDigits.length > 6 || !asciiDigits(mantDigits) || !validAssumedExpStr(expStr)) {
     throw new Error(`malformed assumed-exponent field: '${field}'`);
   }
   if (isAllZero(mantDigits)) return "0";
@@ -274,6 +280,8 @@ export function epochFromTLE(line1: string): string {
   if (doy < 1 || doy > daysInYear(year)) {
     throw new Error(`day-of-year ${doy} out of range for ${year}`);
   }
+  // SPEC §2.3: L ≤ 8 keeps F·USEC_PER_DAY < 2^63 (exact in 64-bit ints everywhere).
+  if (fracStr.length > 8) throw new Error(`epoch fraction longer than 8 digits: '${raw}'`);
   let usecOfDay = 0;
   if (fracStr !== "") {
     const fracVal = BigInt(fracStr);
@@ -289,8 +297,22 @@ function line1Offset(line1: string): number {
   return 0;
 }
 
+// §1.1 input model: a TLE line is a byte string of the §2.2 whitespace set
+// (0x09–0x0D) and printable ASCII (0x20–0x7E) ONLY. Enforcing it makes byte,
+// UTF-16 and code-point slicing coincide across clients (surrogates, astral
+// chars and control bytes all reject here).
+function asciiTLELine(line: string): void {
+  for (let i = 0; i < line.length; i++) {
+    const c = line.charCodeAt(i);
+    if ((c >= 0x20 && c <= 0x7e) || (c >= 0x09 && c <= 0x0d)) continue;
+    throw new Error(`non-ASCII/control byte 0x${c.toString(16)} at offset ${i} in TLE line`);
+  }
+}
+
 /** Build the canonical 11-field record from a TLE line pair (SPEC §2.5). */
 export function coreRecordFromTLE(line1: string, line2: string): CoreRecord {
+  asciiTLELine(line1);
+  asciiTLELine(line2);
   const off = line1Offset(line1);
   const l1 = off > 0 ? line1.slice(off) : line1;
   return {
@@ -332,13 +354,35 @@ export function recordJSONBytes(r: CoreRecord): Uint8Array {
   return enc.encode(recordJSONString(r));
 }
 
-/** Sort by int(NORAD), reject duplicates, serialize the array (the sole hash input). */
+// ^(0|[1-9][0-9]*)$ with ≤ 9 digits (SPEC §2.6) — makes the int() sort exact everywhere.
+function canonicalNoradToken(s: string): boolean {
+  if (!asciiDigits(s) || s.length > 9) return false;
+  return s.length === 1 || s[0] !== "0";
+}
+
+// Non-empty, drawn from [0-9.\-T:] (SPEC §2.6) — the charset that guarantees no
+// JSON escaping can ever fire.
+function canonicalValueToken(s: string): boolean {
+  if (s === "") return false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (!((c >= 48 && c <= 57) || c === 46 || c === 45 || c === 84 || c === 58)) return false;
+  }
+  return true;
+}
+
+/** Sort by int(NORAD), reject duplicates + non-canonical tokens, serialize the array. */
 export function canonicalBytes(records: CoreRecord[]): Uint8Array {
   const seen = new Set<string>();
   for (const r of records) {
+    if (!canonicalNoradToken(r.NORAD_CAT_ID)) throw new Error(`non-canonical NORAD_CAT_ID token: '${r.NORAD_CAT_ID}'`);
+    for (const k of CORE_KEYS) {
+      if (!canonicalValueToken(r[k])) throw new Error(`non-canonical value token '${r[k]}' in record ${r.NORAD_CAT_ID}`);
+    }
     if (seen.has(r.NORAD_CAT_ID)) throw new Error(`duplicate NORAD_CAT_ID in catalog: ${r.NORAD_CAT_ID}`);
     seen.add(r.NORAD_CAT_ID);
   }
+  // tokens pre-validated ≤ 9 digits: Number() is exact
   const ordered = records.slice().sort((a, b) => Number(a.NORAD_CAT_ID) - Number(b.NORAD_CAT_ID));
   return enc.encode("[" + ordered.map(recordJSONString).join(",") + "]");
 }

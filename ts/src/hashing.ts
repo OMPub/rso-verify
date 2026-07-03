@@ -28,6 +28,12 @@ export function docChainId(): Uint8Array {
  * 160 bytes; recordCount is NOT hashed; docRef is left-zero-padded big-endian.
  */
 export function blockHash(docRef: bigint, parent: Uint8Array, content: Uint8Array): Uint8Array {
+  // Uint8Array.set would silently zero-pad a short hash into the payload —
+  // reject instead (Go's [32]byte makes this unrepresentable; match it).
+  if (parent.length !== 32 || content.length !== 32) {
+    throw new Error(`blockHash: parent/content must be 32 bytes, got ${parent.length}/${content.length}`);
+  }
+  if (docRef < 0n || docRef >= 1n << 64n) throw new Error(`blockHash: docRef out of uint64 range`);
   const payload = new Uint8Array(160);
   payload.set(typeHash(), 0);
   payload.set(docChainId(), 32);
@@ -118,8 +124,11 @@ export function toHex(b: Uint8Array): string {
 }
 
 export function parse32(s: string): Uint8Array {
+  // SPEC §1.1: optional 0x, either case, NO surrounding whitespace, and every
+  // character must be a hex digit — parseInt's NaN→0 coercion is the classic
+  // fail-open (64 chars of garbage silently becoming the zero hash).
   const hex = s.startsWith("0x") ? s.slice(2) : s;
-  if (hex.length !== 64) throw new Error(`expected 32 bytes, got ${hex.length / 2}`);
+  if (!/^[0-9a-fA-F]{64}$/.test(hex)) throw new Error(`expected 64 hex chars, got '${s.length > 80 ? s.slice(0, 80) + "…" : s}'`);
   const out = new Uint8Array(32);
   for (let i = 0; i < 32; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16);
   return out;

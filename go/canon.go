@@ -63,14 +63,16 @@ func isAllZero(s string) bool {
 	return true
 }
 
-func signedIntStr(s string) bool {
+// validAssumedExpStr: the assumed-exponent field's exponent — an optional sign
+// then EXACTLY 1 or 2 ASCII digits (SPEC §2.2 shape bounds).
+func validAssumedExpStr(s string) bool {
 	if s == "" {
 		return false
 	}
 	if s[0] == '+' || s[0] == '-' {
 		s = s[1:]
 	}
-	return asciiDigits(s)
+	return (len(s) == 1 || len(s) == 2) && asciiDigits(s)
 }
 
 // Whitespace is ASCII-only by spec (SPEC §2.2): exactly \t\n\v\f\r and space.
@@ -128,6 +130,9 @@ func CanonDecimal(s string) (string, error) {
 		ev, err := strconv.Atoi(esign + exp)
 		if err != nil {
 			return "", err
+		}
+		if ev > 999 || ev < -999 { // SPEC §2.2 step 3: |exponent| ≤ 999, identical bound in every language
+			return "", fmt.Errorf("exponent out of bounds: %q", s)
 		}
 		s = applyExponent(mant, ev)
 	}
@@ -187,7 +192,8 @@ func DecodeAssumedExp(field string) (string, error) {
 		}
 		mantDigits, expStr = rest[:5], rest[5:]
 	}
-	if len(mantDigits) < 5 || !asciiDigits(mantDigits) || !signedIntStr(expStr) {
+	// SPEC §2.2 shape bounds: mantissa EXACTLY 5 or 6 digits, exponent 1–2 digits.
+	if len(mantDigits) < 5 || len(mantDigits) > 6 || !asciiDigits(mantDigits) || !validAssumedExpStr(expStr) {
 		return "", fmt.Errorf("malformed assumed-exponent field: %q", field)
 	}
 	if isAllZero(mantDigits) {
@@ -333,6 +339,9 @@ func EpochFromTLE(line1 string) (string, error) {
 	if doy < 1 || doy > daysInYear(year) {
 		return "", fmt.Errorf("day-of-year %d out of range for %d", doy, year)
 	}
+	if len(fracStr) > 8 { // SPEC §2.3: L ≤ 8 keeps F·USEC_PER_DAY < 2^63 (exact everywhere)
+		return "", fmt.Errorf("epoch fraction longer than 8 digits: %q", raw)
+	}
 	usecOfDay := 0
 	if fracStr != "" {
 		fracVal, err := strconv.ParseInt(fracStr, 10, 64)
@@ -375,9 +384,29 @@ func line1Offset(line1 string) int {
 	return 0
 }
 
+// asciiTLELine enforces the §1.1 input model: a TLE line is a byte string of
+// the §2.2 whitespace set (0x09–0x0D) and printable ASCII (0x20–0x7E) ONLY.
+// This is what makes byte, UTF-16 and code-point slicing coincide across clients.
+func asciiTLELine(line string) error {
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if (c >= 0x20 && c <= 0x7e) || (c >= 0x09 && c <= 0x0d) {
+			continue
+		}
+		return fmt.Errorf("non-ASCII/control byte 0x%02x at offset %d in TLE line", c, i)
+	}
+	return nil
+}
+
 // CoreRecordFromTLE builds the canonical 11-field record from a TLE line pair.
 func CoreRecordFromTLE(line1, line2 string) (CoreRecord, error) {
 	var r CoreRecord
+	if err := asciiTLELine(line1); err != nil {
+		return r, err
+	}
+	if err := asciiTLELine(line2); err != nil {
+		return r, err
+	}
 	off := line1Offset(line1)
 	l1 := line1
 	if off > 0 {
@@ -441,11 +470,48 @@ func (r CoreRecord) JSONBytes() []byte {
 		`","RA_OF_ASC_NODE":"` + r.RaOfAscNode + `"}`)
 }
 
-// CanonicalBytes sorts a catalog ascending by int(NORAD), rejects duplicates, and
-// serializes the JSON array (the sole hash input). Empty day → "[]".
+// canonicalNoradToken: ^(0|[1-9][0-9]*)$ with ≤ 9 digits (SPEC §2.6) — makes the
+// int() sort exact in every language.
+func canonicalNoradToken(s string) bool {
+	if !asciiDigits(s) || len(s) > 9 {
+		return false
+	}
+	return len(s) == 1 || s[0] != '0'
+}
+
+// canonicalValueToken: non-empty, drawn from [0-9.\-T:] (SPEC §2.6) — the charset
+// that guarantees no JSON escaping can ever fire.
+func canonicalValueToken(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || c == '.' || c == '-' || c == 'T' || c == ':') {
+			return false
+		}
+	}
+	return true
+}
+
+// CanonicalBytes sorts a catalog ascending by int(NORAD), rejects duplicates and
+// non-canonical tokens, and serializes the JSON array (the sole hash input).
+// Empty day → "[]".
 func CanonicalBytes(records []CoreRecord) ([]byte, error) {
 	seen := map[string]bool{}
 	for _, r := range records {
+		if !canonicalNoradToken(r.NoradCatID) {
+			return nil, fmt.Errorf("non-canonical NORAD_CAT_ID token: %q", r.NoradCatID)
+		}
+		for _, v := range [11]string{
+			r.ArgOfPericenter, r.BStar, r.Eccentricity, r.Epoch, r.Inclination,
+			r.MeanAnomaly, r.MeanMotion, r.MeanMotionDDot, r.MeanMotionDot,
+			r.NoradCatID, r.RaOfAscNode,
+		} {
+			if !canonicalValueToken(v) {
+				return nil, fmt.Errorf("non-canonical value token %q in record %s", v, r.NoradCatID)
+			}
+		}
 		if seen[r.NoradCatID] {
 			return nil, fmt.Errorf("duplicate NORAD_CAT_ID in catalog: %s", r.NoradCatID)
 		}
@@ -454,7 +520,7 @@ func CanonicalBytes(records []CoreRecord) ([]byte, error) {
 	ordered := make([]CoreRecord, len(records))
 	copy(ordered, records)
 	sort.SliceStable(ordered, func(i, j int) bool {
-		ni, _ := strconv.Atoi(ordered[i].NoradCatID)
+		ni, _ := strconv.Atoi(ordered[i].NoradCatID) // token pre-validated: Atoi cannot fail
 		nj, _ := strconv.Atoi(ordered[j].NoradCatID)
 		return ni < nj
 	})

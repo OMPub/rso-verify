@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   keccak256, typeHash, docChainId, blockHash,
-  merkleRoot, verifyProof, parse32, toHex,
+  merkleRoot, merkleProof, verifyProof, parse32, toHex,
   decodeAssumedExp, canonDecimal, decodeSatnum, epochFromTLE,
   coreRecordFromTLE, recordJSONString, contentHash,
   parseManifest, buildSpine,
@@ -22,6 +22,9 @@ const hex = (b: Uint8Array): string => "0x" + toHex(b);
 test("keccak256 of empty string", () => {
   assert.equal(toHex(keccak256(new Uint8Array(0))),
     "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470");
+  // pinned in the language-neutral vectors too, not just client lore
+  assert.equal(j("anchors.json").keccak_empty,
+    "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470");
 });
 
 test("constants derive from preimages", () => {
@@ -38,6 +41,11 @@ test("on-chain Sepolia genesis self-check", () => {
 
 test("decode vectors", () => {
   const d = j("decode.json");
+  // SPEC §6: a missing or empty vector class is a conformance failure — a
+  // typo'd key must fail loudly, never shrink coverage silently.
+  for (const key of ["decode_assumed_exp", "canon_decimal", "decode_satnum", "epoch_from_tle"]) {
+    assert.ok(Array.isArray(d[key]) && d[key].length > 0, `decode.json '${key}' present and non-empty`);
+  }
   for (const [inp, want] of d.decode_assumed_exp) assert.equal(decodeAssumedExp(inp), want, `decodeAssumedExp(${inp})`);
   for (const [inp, want] of d.canon_decimal) assert.equal(canonDecimal(inp), want, `canonDecimal(${inp})`);
   for (const [inp, want] of d.decode_satnum) assert.equal(decodeSatnum(inp), want, `decodeSatnum(${inp})`);
@@ -54,25 +62,65 @@ test("reject vectors: non-canonical inputs fail closed", () => {
   const reject = j("decode.json").reject as Array<{ fn: string; args: string[] }>;
   assert.ok(reject.length > 0, "reject vectors present");
   for (const r of reject) {
+    // an unknown fn must FAIL the suite — the TypeError it would raise inside
+    // assert.throws would otherwise count as a "successful rejection"
+    assert.ok(Object.hasOwn(fns, r.fn), `known reject fn '${r.fn}'`);
     assert.throws(() => fns[r.fn](r.args[0]), `${r.fn}(${JSON.stringify(r.args[0])}) should reject`);
   }
 });
 
 test("record vectors: TLE → core record → contentHash", () => {
-  for (const r of j("records.json")) {
+  const recs = j("records.json");
+  assert.ok(Array.isArray(recs) && recs.length > 0, "record vectors present");
+  for (const r of recs) {
     const cr = coreRecordFromTLE(r.line1, r.line2);
     assert.equal(recordJSONString(cr), r.record_json_bytes, `${r.name} bytes`);
     assert.equal(contentHash([cr]), r.single_record_contentHash, `${r.name} contentHash`);
   }
 });
 
-test("merkle root + inclusion proof", () => {
+test("catalog vectors: empty day, INTEGER NORAD sort, duplicate reject", () => {
+  const cat = j("catalogs.json");
+  assert.ok(cat.empty_day_contentHash && cat.unsorted_input?.tles?.length >= 2, "catalog vectors present");
+  assert.equal(contentHash([]), cat.empty_day_contentHash, "empty day");
+  const recs = cat.unsorted_input.tles.map(([l1, l2]: [string, string]) => coreRecordFromTLE(l1, l2));
+  assert.equal(contentHash(recs), cat.unsorted_input.contentHash, "int-sorted multi-record hash");
+  assert.throws(() => contentHash([...recs, recs[cat.reject_duplicate_norad.tles_repeat_index]]),
+    "duplicate NORAD must be a hard error");
+});
+
+test("merkle: roots, proofs (incl. promoted short path), degenerate + negative cases", () => {
   const mk = j("merkle.json");
+  assert.ok(mk.leaves?.length && mk.single_leaf?.leaves?.length === 1 && mk.two_leaves?.leaves?.length === 2
+    && mk.promoted_leaf_proof?.proof?.length && mk.seven_leaves_root?.root && mk.reject?.length,
+    "all merkle vector classes present");
   const leaves = mk.leaves.map(parse32);
   const root = merkleRoot(leaves);
   assert.equal(toHex(root), mk.root.replace(/^0x/, ""));
   const proof = mk.proof.map(parse32);
   assert.ok(verifyProof(leaves[mk.proof_index], proof, root));
+  // degenerate shapes
+  assert.equal(toHex(merkleRoot(mk.single_leaf.leaves.map(parse32))), mk.single_leaf.root.replace(/^0x/, ""), "single leaf");
+  assert.equal(toHex(merkleRoot(mk.two_leaves.leaves.map(parse32))), mk.two_leaves.root.replace(/^0x/, ""), "two leaves");
+  // promoted leaf: sibling-less levels are skipped → SHORT path
+  const pp: Uint8Array[] = mk.promoted_leaf_proof.proof.map(parse32);
+  const gotPP = merkleProof(leaves, mk.promoted_leaf_proof.proof_index);
+  assert.equal(gotPP.length, pp.length, "promoted-leaf proof length");
+  gotPP.forEach((s, i) => assert.equal(toHex(s), toHex(pp[i]), `promoted-leaf sibling ${i}`));
+  assert.ok(verifyProof(leaves[mk.promoted_leaf_proof.proof_index], pp, root), "promoted-leaf proof verifies");
+  // seven leaves 1..7 big-endian: odd counts at two levels
+  const seven = Array.from({ length: 7 }, (_, i) => { const b = new Uint8Array(32); b[31] = i + 1; return b; });
+  assert.equal(toHex(merkleRoot(seven)), mk.seven_leaves_root.root.replace(/^0x/, ""), "seven leaves");
+  // negative cases — a verifyProof that always returns true MUST fail here
+  for (const rej of mk.reject) {
+    if (rej.must_verify_false) {
+      assert.equal(verifyProof(leaves[rej.proof_index], rej.proof.map(parse32), root), false, rej.comment);
+    } else if (rej.must_error) {
+      assert.throws(() => merkleRoot(rej.leaves.map(parse32)), rej.comment);
+    } else {
+      assert.fail(`merkle reject (${rej.comment}): entry declares no expectation`);
+    }
+  }
 });
 
 test("block-hash vectors", () => {

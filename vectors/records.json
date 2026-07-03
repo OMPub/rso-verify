@@ -18,5 +18,25 @@
   },
   "record_json_bytes": "{\"ARG_OF_PERICENTER\":\"89.579\",\"BSTAR\":\"0.00017028\",\"ECCENTRICITY\":\"0.0004499\",\"EPOCH\":\"2026-06-21T18:27:32.932224\",\"INCLINATION\":\"51.6326\",\"MEAN_ANOMALY\":\"270.663\",\"MEAN_MOTION\":\"15.4935758\",\"MEAN_MOTION_DDOT\":\"0\",\"MEAN_MOTION_DOT\":\"0.00016717\",\"NORAD_CAT_ID\":\"25544\",\"RA_OF_ASC_NODE\":\"277.4139\"}",
   "single_record_contentHash": "d21f9317ee71fc6c019fb0153839dc6da85edf94e8477574f54b9a1736a5b3f1"
+ },
+ {
+  "name": "legacy column-shift (blank designator, +1)",
+  "line1": "1 00005U           58002.00000000  .00000000  00000-0  00000-0 0    16",
+  "line2": "2 00005  34.2500 100.0000 1849000  10.0000 350.0000 10.84800000    12",
+  "core_record": {
+   "NORAD_CAT_ID": "5",
+   "EPOCH": "1958-01-02T00:00:00.000000",
+   "INCLINATION": "34.25",
+   "RA_OF_ASC_NODE": "100",
+   "ECCENTRICITY": "0.1849",
+   "ARG_OF_PERICENTER": "10",
+   "MEAN_ANOMALY": "350",
+   "MEAN_MOTION": "10.848",
+   "MEAN_MOTION_DOT": "0",
+   "MEAN_MOTION_DDOT": "0",
+   "BSTAR": "0"
+  },
+  "record_json_bytes": "{\"ARG_OF_PERICENTER\":\"10\",\"BSTAR\":\"0\",\"ECCENTRICITY\":\"0.1849\",\"EPOCH\":\"1958-01-02T00:00:00.000000\",\"INCLINATION\":\"34.25\",\"MEAN_ANOMALY\":\"350\",\"MEAN_MOTION\":\"10.848\",\"MEAN_MOTION_DDOT\":\"0\",\"MEAN_MOTION_DOT\":\"0\",\"NORAD_CAT_ID\":\"5\",\"RA_OF_ASC_NODE\":\"100\"}",
+  "single_record_contentHash": "cd3d7b885df3ba371ba387856083f0816bb0c14ff18f8d7399f09055cf7d47ea"
  }
 ]

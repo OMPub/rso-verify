@@ -33,25 +33,49 @@ export interface SpineResult {
   monthResults: MonthResult[];
 }
 
-/** Parse "YYYY-MM-DD <contentHash> <recordCount>" lines. */
+// Proleptic-Gregorian helpers for the SPEC §1.1 calendar-validity check.
+const MONTH_LEN = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+const isLeap = (y: number): boolean => y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
+const daysInMonth = (y: number, m: number): number => (m === 2 && isLeap(y) ? 29 : MONTH_LEN[m - 1]);
+function nextDay(y: number, m: number, d: number): [number, number, number] {
+  d++;
+  if (d > daysInMonth(y, m)) { d = 1; m++; if (m > 12) { m = 1; y++; } }
+  return [y, m, d];
+}
+
+const MANIFEST_LINE = /^(\d{4})-(\d{2})-(\d{2}) ([0-9a-f]{64}) (0|[1-9][0-9]*)$/;
+
+/**
+ * Parse "YYYY-MM-DD <contentHash> <recordCount>" lines under the SPEC §5
+ * grammar: LF lines, exactly two single-space separators, bare lowercase hex,
+ * calendar-valid dates advancing by exactly one day, canonical recordCount.
+ * Reject anything else — a malformed manifest MUST never yield anchors.
+ */
 export function parseManifest(path: string): ManifestDay[] {
   const text = readFileSync(path, "utf8");
   const days: ManifestDay[] = [];
   const lines = text.split("\n");
   for (let ln = 0; ln < lines.length; ln++) {
-    const line = lines[ln].trim();
+    const line = lines[ln];
     if (line === "") continue;
-    const f = line.split(/\s+/);
-    if (f.length !== 3) throw new Error(`manifest line ${ln + 1}: want 3 fields, got ${f.length}`);
-    const dp = f[0].split("-");
-    if (dp.length !== 3) throw new Error(`manifest line ${ln + 1}: bad day '${f[0]}'`);
-    days.push({
-      year: Number(dp[0]),
-      month: Number(dp[1]),
-      day: Number(dp[2]),
-      contentHash: parse32(f[1]),
-      recordCount: Number(f[2]),
-    });
+    if (line.length > 96) throw new Error(`manifest line ${ln + 1}: longer than 96 bytes`);
+    const m = MANIFEST_LINE.exec(line);
+    if (!m) throw new Error(`manifest line ${ln + 1}: does not match the SPEC §5 grammar`);
+    const year = Number(m[1]);
+    const month = Number(m[2]);
+    const day = Number(m[3]);
+    if (month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month)) {
+      throw new Error(`manifest line ${ln + 1}: '${m[1]}-${m[2]}-${m[3]}' is not a calendar date`);
+    }
+    if (days.length > 0) {
+      const p = days[days.length - 1];
+      const [ey, em, ed] = nextDay(p.year, p.month, p.day);
+      if (year !== ey || month !== em || day !== ed) {
+        throw new Error(`manifest line ${ln + 1}: date does not follow the previous line by exactly one day`);
+      }
+    }
+    if (m[5].length > 15) throw new Error(`manifest line ${ln + 1}: recordCount too large`);
+    days.push({ year, month, day, contentHash: parse32(m[4]), recordCount: Number(m[5]) });
   }
   return days;
 }

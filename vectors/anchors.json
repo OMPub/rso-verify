@@ -2,6 +2,7 @@
  "schema": "rso-core-omm-v1",
  "docChainId": "0x6011620b5a3faa23f8078c2af0bb1a87bb85a68f784abdf3dbae67939c399bea",
  "doc_block_typehash": "0xb84212102d711af6fc7ae9fa3e37753befb8b25762a552631b0e9ff9e8d07894",
+ "keccak_empty": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
  "days": 24926,
  "months": 819,
  "genesis": {

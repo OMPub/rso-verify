@@ -144,14 +144,16 @@ func MonthDocRef(year, month int) uint64 {
 func Hex32(b [32]byte) string { return hex.EncodeToString(b[:]) }
 
 func Parse32(s string) ([32]byte, error) {
-	s = strings.TrimPrefix(strings.TrimSpace(s), "0x")
+	// SPEC §1.1: optional 0x, either case, NO surrounding whitespace, and every
+	// character must be a hex digit — bad digits must reject, never zero-fill.
+	s = strings.TrimPrefix(s, "0x")
 	var out [32]byte
+	if len(s) != 64 {
+		return out, fmt.Errorf("expected 64 hex chars, got %d", len(s))
+	}
 	raw, err := hex.DecodeString(s)
 	if err != nil {
 		return out, err
-	}
-	if len(raw) != 32 {
-		return out, fmt.Errorf("expected 32 bytes, got %d", len(raw))
 	}
 	copy(out[:], raw)
 	return out, nil

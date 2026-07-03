@@ -12,5 +12,46 @@
   "f2764fd79fdab5132fc349ba555c9c56ff0c935c889c17ebe3d61315d780934e",
   "884ff14f19d1564614ab3184d7bdc35a1a9ff90d36ac962b05a81aeb56027c22",
   "565fb0e0cefe32cf4000e4a67ddec8820111a733aa8ba010d242a5fe477e04c4"
+ ],
+ "single_leaf": {
+  "leaves": [
+   "4d5a9584d985e8fb44015a8affa9b76f1ff16f65e61df7156d8e8159e1448978"
+  ],
+  "root": "4d5a9584d985e8fb44015a8affa9b76f1ff16f65e61df7156d8e8159e1448978"
+ },
+ "two_leaves": {
+  "leaves": [
+   "4d5a9584d985e8fb44015a8affa9b76f1ff16f65e61df7156d8e8159e1448978",
+   "d103cfb5e499c566904787533afbdec56f95492d67fc00e2c0d0161ba99653f1"
+  ],
+  "root": "884ff14f19d1564614ab3184d7bdc35a1a9ff90d36ac962b05a81aeb56027c22"
+ },
+ "promoted_leaf_proof": {
+  "comment": "leaf 4 of the 5-leaf tree is promoted at two levels, so its path is ONE sibling",
+  "proof_index": 4,
+  "proof": [
+   "f40b6eac2ed476b179857c5686ddddd8318634cc752e7d1742e25ad12a5633a6"
+  ]
+ },
+ "seven_leaves_root": {
+  "comment": "leaves are 32-byte big-endian 1..7; odd counts at two levels",
+  "root": "65d0090376411f6ff0425321bb9af8a38c221373f24f7293cab783cb0c8d7d2a"
+ },
+ "reject": [
+  {
+   "comment": "leaf 2, first sibling zeroed -> verifyProof MUST return false",
+   "proof_index": 2,
+   "proof": [
+    "0000000000000000000000000000000000000000000000000000000000000000",
+    "884ff14f19d1564614ab3184d7bdc35a1a9ff90d36ac962b05a81aeb56027c22",
+    "565fb0e0cefe32cf4000e4a67ddec8820111a733aa8ba010d242a5fe477e04c4"
+   ],
+   "must_verify_false": true
+  },
+  {
+   "comment": "zero leaves MUST error",
+   "leaves": [],
+   "must_error": true
+  }
  ]
 }

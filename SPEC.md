@@ -28,7 +28,7 @@ produce identical bytes.
 
 ---
 
-## 0. Constants
+## 1. Conventions and constants
 
 | Name | Value |
 |---|---|
@@ -40,7 +40,31 @@ produce identical bytes.
 
 Both 32-byte constants MUST be **derived** by the verifier from their preimages,
 not hardcoded — that proves the keccak implementation is correct. `keccak256` is
-Ethereum **Keccak-256** (padding byte `0x01`), **not** NIST SHA3-256 (`0x06`).
+Ethereum **Keccak-256** (padding byte `0x01`), **not** NIST SHA3-256 (`0x06`);
+`keccak256("") = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470`
+(`vectors/anchors.json → keccak_empty`).
+
+### 1.1 Input model, rejection semantics, hex, calendar
+
+- **Byte strings.** Every input this spec consumes — TLE lines, decoder fields,
+  manifest lines — is a **byte string**; all indices and slices are **0-based
+  byte offsets**. A TLE line MUST contain only the bytes `0x09–0x0D` (the §2.2
+  whitespace set) and `0x20–0x7E`; **any other byte anywhere in either line
+  rejects the elset**. With that guard, byte / UTF-16 / code-point indexing
+  coincide, so implementations in every string model slice identically.
+- **Reject = no result.** Wherever this spec says *reject*, the enclosing
+  computation MUST produce **no value at all** (raise / return an error).
+  Skipping the offending record, substituting a default, or hashing a partial
+  result is non-conforming.
+- **Hex.** 32-byte values in JSON vectors are lowercase hex with a `0x` prefix;
+  in `daily_manifest.txt` they are **bare lowercase** hex. On input a verifier
+  accepts an optional `0x` prefix and either case, **except** in the manifest
+  (bare lowercase only). Surrounding whitespace is never accepted, and a 64-char
+  hex parse MUST reject any non-hex character — silently mapping bad digits to
+  zero bytes is the classic fail-open. All hex output is lowercase.
+- **Calendar.** All dates are **proleptic Gregorian** (leap year: divisible by
+  4, except centuries, which must be divisible by 400) and MUST be
+  calendar-valid wherever they appear.
 
 ---
 
@@ -72,15 +96,21 @@ The shortest plain-decimal form of a terminating decimal:
 1. Strip ASCII whitespace — **exactly** the bytes `0x09 0x0A 0x0B 0x0C 0x0D 0x20`
    (`\t \n \v \f \r` and space), **never** Unicode whitespace (NBSP U+00A0, NEL
    U+0085, BOM U+FEFF, the C0 information separators U+001C–001F, ideographic space
-   U+3000, …). Then strip a trailing `\` (legacy artifact), then ASCII whitespace
-   again. This narrow, language-neutral rule is load-bearing: `str.strip()` (Python),
-   `unicode.IsSpace` (Go), and `String.trim()` (JS) each strip a *different* exotic
-   set, so a client that defers to its language's trim **will** diverge. Anything
-   non-ASCII surviving the strip is rejected fail-closed by the ASCII-digit guard.
+   U+3000, …). Then strip any **run of trailing `\`** characters (legacy artifact),
+   then ASCII whitespace again. This narrow, language-neutral rule is load-bearing:
+   `str.strip()` (Python), `unicode.IsSpace` (Go), and `String.trim()` (JS) each
+   strip a *different* exotic set, so a client that defers to its language's trim
+   **will** diverge. Anything non-ASCII surviving the strip is rejected fail-closed
+   by the ASCII-digit guard. These strip rules belong to `canon_decimal` **alone**;
+   the assumed-exponent and satnum decoders define their own pre-processing below.
 2. Capture sign: one leading `-` → negative; a leading `+` is dropped; no other
-   signs are permitted.
+   signs are permitted (the *exponent* in step 3 may carry one optional leading
+   `+`/`-` of its own).
 3. If `e`/`E` is present, expand to plain decimal by shifting the point per the
-   integer exponent (no float).
+   integer exponent (no float). The exponent, after its optional sign, MUST be all
+   ASCII digits with value ≤ `999` — anything larger is malformed → reject (no
+   real orbital field needs even two digits; the bound keeps expansion trivially
+   cheap and identically bounded in every language).
 4. Ensure exactly one `.`; split int/frac. `frac = frac.rstrip('0')`;
    `int = int.lstrip('0') or '0'`.
 5. Recombine: `int`, or `int + '.' + frac` if `frac` is non-empty.
@@ -99,19 +129,27 @@ TLE field directly (`canon_decimal` supplies the leading `0` for a bare `.`).
 #### Assumed-exponent decode (`BSTAR`, `MEAN_MOTION_DDOT`) — one unified rule
 
 Covers the standard form **and** every Space-Track historical overflow form for
-large drag terms on near-reentry objects:
+large drag terms on near-reentry objects. The raw field, **before any
+stripping**, MUST be at least 7 characters — shorter is malformed → reject.
 
-1. A leading `+`/`-`/space is the **mantissa sign** (`-` negative, else positive);
-   a leading digit means no sign.
-2. If there is an interior `+`/`-`, the **exponent** is the substring from the last
+1. The **first character only** is the sign slot: `+` / `-` / space (`-` →
+   negative, else positive); a leading ASCII digit means no sign; any other
+   first character → reject. After removing the sign slot, right-strip the §2.2
+   ASCII whitespace set — **no backslash strip, no left-strip** (further leading
+   whitespace is malformed and fails the digit checks below).
+2. If an interior `+`/`-` remains, the **exponent** is the substring from the last
    one (e.g. `-3`, `+1`, `-10`) and the **mantissa** is the digits before it.
    If there is **no** interior sign, the mantissa is the first 5 digits and the
-   rest (1–2 digits) is a **positive** exponent.
-3. The mantissa has an **implied decimal point 5 places from the right**: 5 digits
-   → `0.MMMMM`, 6 digits → `M.MMMMM`.
+   remainder is a **positive** exponent.
+3. Shape bounds — reject anything else: the mantissa is **exactly 5 or 6 ASCII
+   digits**; the exponent, after its optional sign, is **exactly 1 or 2 ASCII
+   digits**. The mantissa has an **implied decimal point 5 places from the
+   right**: 5 digits → `0.MMMMM`, 6 digits → `M.MMMMM`.
 
-All-zero mantissa → `"0"`; **fail closed** on anything else. Verified byte-for-byte
-against the authoritative Space-Track `gp_history` JSON:
+An all-zero mantissa yields `"0"` — but only once the **whole field** has
+validated (sign slot, mantissa shape, exponent shape); **fail closed** on
+anything else. Verified byte-for-byte against the authoritative Space-Track
+`gp_history` JSON:
 
 | field | → | field | → |
 |---|---|---|---|
@@ -122,32 +160,48 @@ against the authoritative Space-Track `gp_history` JSON:
 
 **Column-shift tolerance.** A subset of legacy records have a blank international
 designator + one extra space, shifting every line-1 field by +1. Detect it from
-the epoch decimal point — index 23 (standard) vs 24 (shifted) — and read line-1
-fields at that offset. Line 2 is never shifted.
+the epoch decimal point — byte 23 (standard) vs 24 (shifted) — and read line-1
+fields at that offset. Precedence: byte 23 is checked **first**, then byte 24;
+if **neither** holds `.`, the line is treated as standard (offset 0) and epoch
+parsing decides its fate. Line 2 is never shifted.
 
 ### 2.3 `EPOCH` — `YYYY-MM-DDThh:mm:ss.ffffff`, integer-only, on the 864-µs grid
 
 The one canonical epoch token. Because `1e-8 day = 864 µs` exactly, every TLE
 epoch's microsecond-of-day is a multiple of 864 and the TLE path **never rounds**.
 
-- **TLE `YYDDD.FFFFFFFF`** (line 1, cols 19–32): year pivot `YY≥57 ⇒ 1900+YY`,
-  `YY≤56 ⇒ 2000+YY`; `usec = (int(F)·86400000000 + 10^L/2) / 10^L` (integer
-  division, `L` = number of fraction digits); leap-correct day-of-year →
-  (month, day); `divmod` to h/m/s/µs; render fixed-width.
-- **OMM ISO**: strip `Z`; parse integer parts; round-half-up the seconds fraction
-  to exactly 6 digits with the same integer carry.
+- **TLE `YYDDD.FFFFFFFF`** (line 1, the 14-byte window at bytes 18–32,
+  ASCII-stripped per §2.2 first): year pivot `YY≥57 ⇒ 1900+YY`, `YY≤56 ⇒
+  2000+YY` (representable range 1957–2056); day-of-year MUST be `1…365/366` for
+  that (proleptic-Gregorian) year; `usec = (int(F)·86400000000 + 10^L/2) / 10^L`
+  (integer division, `L` = number of fraction digits). **`L` MUST be ≤ 8** — a
+  longer fraction is malformed → reject. With `L ≤ 8` the product is < 2^63
+  (exact in 64-bit integers everywhere) and the `+10^L/2` term is inert — the
+  TLE path never rounds. `L = 0` (no digits after an optional `.`, or no `.` at
+  all) ⇒ `usec = 0`. Then leap-correct day-of-year → (month, day); `divmod` to
+  h/m/s/µs; render fixed-width `YYYY-MM-DDThh:mm:ss.ffffff`.
 - Any epoch whose µs-of-day is **not** a multiple of 864 is an ingest error →
   **reject** (a genuine sub-864-µs source needs a new schema id, never an in-place
-  change).
+  change). With `L ≤ 8` every TLE epoch lands on the grid *by construction*; the
+  grid check guards the rendering API and any future ingest path.
+
+> *Informative:* the producer also ingests OMM ISO-8601 epochs
+> (`…T18:27:32.932224Z`), normalising them to this same token. That is a
+> producer concern — the **normative verifier surface is TLE-only**, and the
+> OMM↔TLE equivalence is witnessed by the published record vectors, not by a
+> second decoder in every client.
 
 Worked: ISS `26172.76913116` → `2026-06-21T18:27:32.932224`; Sputnik
 `57277.80437500` → `1957-10-04T19:18:18.000000`.
 
 ### 2.4 `NORAD_CAT_ID` — base-10 integer string `^(0|[1-9][0-9]*)$`
 
-**Bounded and ASCII-strict.** A plain numeric id is all ASCII digits with **at
-most 9 significant digits** (`≤ 999,999,999`, the documented OMM maximum; leading
-zeros allowed and stripped). An **Alpha-5** id is **exactly 5 characters**: an
+**Bounded and ASCII-strict.** The field is first stripped with the §2.2 ASCII
+whitespace rule; an empty (or whitespace-only) field → reject. A plain numeric
+id is all ASCII digits with **at most 9 significant digits** (`≤ 999,999,999`,
+the Space-Track/OMM ceiling; leading zeros allowed and stripped — the **raw**
+length is unbounded, only significant digits are bounded). An **Alpha-5** id is
+**exactly 5 characters**: an
 ASCII letter followed by 4 ASCII digits → `ALPHA5.index(first)·10000 + int(last4)`
 (`I`/`O` excluded; `T0000` → `270000`, `Z9999` → `339999`, so `≤ 339,999`). The
 leading character is ASCII-uppercased **only** (`a`–`z` → `A`–`Z`; never Unicode
@@ -167,7 +221,7 @@ With line-1 offset `off` from §2.2, `l1 = line1[off:]`:
 | `EPOCH` | `epoch_from_tle(l1)` |
 | `INCLINATION` | `canon_decimal(line2[8:16])` |
 | `RA_OF_ASC_NODE` | `canon_decimal(line2[17:25])` |
-| `ECCENTRICITY` | `canon_decimal("0." + line2[26:33].strip())` |
+| `ECCENTRICITY` | `canon_decimal("0." + strip_ascii(line2[26:33]))` |
 | `ARG_OF_PERICENTER` | `canon_decimal(line2[34:42])` |
 | `MEAN_ANOMALY` | `canon_decimal(line2[43:51])` |
 | `MEAN_MOTION` | `canon_decimal(line2[52:63])` |
@@ -175,16 +229,25 @@ With line-1 offset `off` from §2.2, `l1 = line1[off:]`:
 | `MEAN_MOTION_DDOT` | `decode_assumed_exp(l1[44:52])` |
 | `BSTAR` | `decode_assumed_exp(l1[53:61])` |
 
-Slices are Python-style (clamped, never panic).
+Slices are 0-based **byte** offsets, Python-style (clamped, never panic); both
+lines MUST first pass the §1.1 byte check, which is what makes byte and
+character slicing coincide. **No byte outside the listed slices is examined**:
+line tags, checksums, and line-1 / line-2 satnum agreement are deliberately
+*not* validated — source hygiene belongs to the producer's capture rule; the
+verifier owns exactly the hashed projection.
 
 ### 2.6 Serialization → `contentHash`
 
 One record's canonical bytes = its 11 keys in **sorted ASCII order**, pinned
 separators, every value a quoted string — equivalent to
-`json.dumps(obj, sort_keys=True, separators=(",",":"), ensure_ascii=True)`. Values
-are drawn from `[0-9.\-T:]` so no JSON escaping ever fires.
+`json.dumps(obj, sort_keys=True, separators=(",",":"), ensure_ascii=True)`.
+A serializer MUST require every `NORAD_CAT_ID` token to be canonical
+(`^(0|[1-9][0-9]*)$`, ≤ 9 digits — so the `int()` sort below is exact in every
+language) and every value to be non-empty and drawn from `[0-9.\-T:]` — which
+is why no JSON escaping can ever fire; anything else → reject.
 
-A day's catalog: dedup by `NORAD_CAT_ID` (a duplicate is a hard error) → **sort
+A day's catalog: a repeated `NORAD_CAT_ID` MUST **abort the day's hash
+computation** (hard error — silent de-duplication is non-conforming) → **sort
 ascending by `int(NORAD_CAT_ID)`** → `"[" + rec₀ + "," + … + "]"`, no whitespace;
 an empty day is `"[]"`. These `canonical_bytes` are the **sole** hash input (no
 newline, BOM, or length prefix).
@@ -194,7 +257,9 @@ contentHash = SHA-256(canonical_bytes)        # lowercase hex; committed as raw 
 ```
 
 `recordCount = len(array)` is published per day (in `daily_manifest.txt`) but is
-**not** hashed; verifiers use it to detect truncation.
+**not** hashed. It is informative for manifest replay; a verifier that
+recomputes a day's catalog **from records** MUST check its count against the
+published value (truncation detection).
 
 Byte-exact ISS record:
 
@@ -242,19 +307,42 @@ keccak), **sorted-pair** so it is commutative:
 combine(a, b) = sha256(min(a,b) ‖ max(a,b))
 ```
 
-On an odd level the lone node is **promoted unchanged** (carried up — *not* the
-Bitcoin/OpenZeppelin duplicate-last rule). `monthRoot` is the fold to one 32-byte
-value. An inclusion proof is the **flat list of sibling hashes** (no left/right
-flags, since `combine` is commutative); verify by folding the leaf with each
-sibling and comparing to `monthRoot`.
+`min`/`max` compare the **raw 32-byte values byte-wise lexicographically**
+(equivalently: as big-endian unsigned integers). Nodes pair **left-to-right
+from index 0**; on an odd-length level the final lone node is **promoted
+unchanged** (carried up — *not* the Bitcoin/OpenZeppelin duplicate-last rule).
+`monthRoot` is the fold to one 32-byte value. A **single leaf is its own root**
+(no hashing); **zero leaves is an error**.
+
+An inclusion proof is the **flat list of sibling hashes** (no left/right flags,
+since `combine` is commutative); a promoted leaf contributes no sibling at that
+level, so its proof is shorter. Verify by folding the leaf with each sibling
+and **byte-comparing** to `monthRoot` — a mismatch is a failed proof (`false`).
+Because the flat commutative path has no leaf/node domain separation, the leaf
+MUST be a value the verifier **recomputed itself** (a daily `blockHash`), never
+a caller-supplied hash.
 
 ---
 
 ## 5. The spine — replaying the whole chain
 
 This is the headline check: from `vectors/daily_manifest.txt` alone (one
-`YYYY-MM-DD  contentHash  recordCount` line per day), a verifier recomputes every
+`YYYY-MM-DD contentHash recordCount` line per day), a verifier recomputes every
 commitment with no other input.
+
+**Manifest grammar — reject anything else.** The file is ASCII with
+LF-terminated lines (no CR). Every non-empty line MUST match
+
+```
+^\d{4}-\d{2}-\d{2} [0-9a-f]{64} (0|[1-9][0-9]*)$
+```
+
+— exactly two single-space (`0x20`) separators, bare lowercase hex, no leading
+or trailing whitespace, at most 96 bytes per line, `recordCount < 2^53`. The
+date MUST be calendar-valid (§1.1) and the day sequence MUST advance by
+**exactly one calendar day per line** — the chain is defined over consecutive
+UTC days, so a gap, duplicate, or reordering is a *different chain*, not a
+tolerable variation.
 
 1. **Daily chain.** One continuous chain over all days in order. `parentHash`
    starts at `0x00…00`; for each day
@@ -294,16 +382,28 @@ recomputed `monthRoot`/`blockHash` pairs matches `vectors/month_roots.json`.
 
 A client is conforming iff, against this repo's `vectors/`, it:
 
-- derives `docChainId` and `DOC_BLOCK_TYPEHASH` from their preimages (keccak OK);
+- derives `docChainId` and `DOC_BLOCK_TYPEHASH` from their preimages and matches
+  `keccak_empty` (proving the Keccak-256 padding byte);
 - passes the on-chain Sepolia `blockHash` self-check (§3);
-- reproduces every `vectors/decode.json` and `vectors/records.json` value,
-  including the ISS `contentHash` `d21f9317…36a5b3f1`;
+- reproduces every `vectors/decode.json`, `vectors/records.json`,
+  `vectors/blockhashes.json` and `vectors/catalogs.json` value — including the
+  ISS `contentHash` `d21f9317…36a5b3f1`, the empty-day hash, and the
+  multi-record catalog (which pins the **integer** NORAD sort);
 - **fail-closed rejects** every entry of `vectors/decode.json → reject` (exotic
   whitespace, non-ASCII digits/letters, out-of-range or mis-shaped satnums, …) —
-  these guard against the language-specific trim/parse divergences in §2.2/§2.4;
-- reproduces `vectors/merkle.json` (root + inclusion proof);
+  these guard against the language-specific trim/parse divergences in §2.2/§2.4 —
+  plus the `vectors/catalogs.json` duplicate-NORAD case and every
+  `vectors/merkle.json → reject` case (corrupted proof → `false`, zero
+  leaves → error);
+- reproduces `vectors/merkle.json` in full: the 5-leaf root and inclusion proof,
+  the single-leaf and two-leaf roots, the **promoted-leaf short proof**, and the
+  seven-leaf root;
 - replays `vectors/daily_manifest.txt` into the §5 anchors and matches all 819
-  entries of `vectors/month_roots.json`.
+  entries of `vectors/month_roots.json`;
+- treats a **missing or empty vector class as a conformance failure** — a suite
+  that silently skips an absent file or empty array proves nothing — and treats
+  an unknown `fn` name in the reject vectors as a failure, never as a
+  successful rejection.
 
 The Go client in [`go/`](go/) is the reference; `go test ./...` runs the whole
 suite.

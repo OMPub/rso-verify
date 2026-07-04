@@ -111,7 +111,9 @@ export function canonDecimal(input: string): string {
       esign = exp[0];
       exp = exp.slice(1);
     }
-    if (!asciiDigits(exp) || mant === "") throw new Error(`bad exponent form: '${s}'`);
+    // the mantissa must contain at least one digit — ".e5" must not materialize
+    // zeros through the exponent shift
+    if (!asciiDigits(exp) || !/[0-9]/.test(mant)) throw new Error(`bad exponent form: '${s}'`);
     const ev = Number(esign + exp);
     // SPEC §2.2 step 3: |exponent| ≤ 999, the identical bound in every language.
     if (ev > 999 || ev < -999) throw new Error(`exponent out of bounds: '${s}'`);
@@ -261,8 +263,14 @@ function pySlice(s: string, i: number, j: number): string {
   return s.slice(i, j);
 }
 
-/** Canonical EPOCH token from a TLE line-1 YYDDD.FFFFFFFF field. */
+/**
+ * Canonical EPOCH token from a TLE line-1 YYDDD.FFFFFFFF field.
+ * The §1.1 line check runs HERE too (not only in coreRecordFromTLE): the epoch
+ * window is located by index, so a non-ASCII char before it would shift the
+ * slice differently in byte- vs UTF-16- vs code-point-indexed implementations.
+ */
 export function epochFromTLE(line1: string): string {
+  asciiTLELine(line1);
   const raw = stripAscii(pySlice(line1, 18, 32));
   if (raw.length < 2 || !asciiDigits(raw.slice(0, 2))) {
     throw new Error(`non-ASCII/invalid epoch year: '${raw}'`);

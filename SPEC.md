@@ -107,10 +107,12 @@ The shortest plain-decimal form of a terminating decimal:
    signs are permitted (the *exponent* in step 3 may carry one optional leading
    `+`/`-` of its own).
 3. If `e`/`E` is present, expand to plain decimal by shifting the point per the
-   integer exponent (no float). The exponent, after its optional sign, MUST be all
-   ASCII digits with value ≤ `999` — anything larger is malformed → reject (no
-   real orbital field needs even two digits; the bound keeps expansion trivially
-   cheap and identically bounded in every language).
+   integer exponent (no float). The mantissa before the `e` MUST contain at
+   least one ASCII digit (`".e5"` must not materialize zeros through the
+   shift), and the exponent, after its optional sign, MUST be all ASCII digits
+   with value ≤ `999` — anything else is malformed → reject (no real orbital
+   field needs even two digits; the bound keeps expansion trivially cheap and
+   identically bounded in every language).
 4. Ensure exactly one `.`; split int/frac. `frac = frac.rstrip('0')`;
    `int = int.lstrip('0') or '0'`.
 5. Recombine: `int`, or `int + '.' + frac` if `frac` is non-empty.
@@ -171,7 +173,11 @@ The one canonical epoch token. Because `1e-8 day = 864 µs` exactly, every TLE
 epoch's microsecond-of-day is a multiple of 864 and the TLE path **never rounds**.
 
 - **TLE `YYDDD.FFFFFFFF`** (line 1, the 14-byte window at bytes 18–32,
-  ASCII-stripped per §2.2 first): year pivot `YY≥57 ⇒ 1900+YY`, `YY≤56 ⇒
+  ASCII-stripped per §2.2 first). The epoch decoder MUST itself enforce the
+  §1.1 line check on its input line — the window is located by byte offset, so
+  a non-ASCII byte anywhere *before* it would silently shift the slice
+  differently in byte-, UTF-16- and code-point-indexed implementations. Then:
+  year pivot `YY≥57 ⇒ 1900+YY`, `YY≤56 ⇒
   2000+YY` (representable range 1957–2056); day-of-year MUST be `1…365/366` for
   that (proleptic-Gregorian) year; `usec = (int(F)·86400000000 + 10^L/2) / 10^L`
   (integer division, `L` = number of fraction digits). **`L` MUST be ≤ 8** — a
@@ -338,7 +344,8 @@ LF-terminated lines (no CR). Every non-empty line MUST match
 ```
 
 — exactly two single-space (`0x20`) separators, bare lowercase hex, no leading
-or trailing whitespace, at most 96 bytes per line, `recordCount < 2^53`. The
+or trailing whitespace, at most 96 bytes per line, `recordCount` at most **15
+digits** (< 10^15, comfortably exact in every language). The
 date MUST be calendar-valid (§1.1) and the day sequence MUST advance by
 **exactly one calendar day per line** — the chain is defined over consecutive
 UTC days, so a gap, duplicate, or reordering is a *different chain*, not a

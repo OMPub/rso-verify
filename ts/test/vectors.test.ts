@@ -62,9 +62,10 @@ test("reject vectors: non-canonical inputs fail closed", () => {
   const reject = j("decode.json").reject as Array<{ fn: string; args: string[] }>;
   assert.ok(reject.length > 0, "reject vectors present");
   for (const r of reject) {
-    // an unknown fn must FAIL the suite — the TypeError it would raise inside
-    // assert.throws would otherwise count as a "successful rejection"
+    // an unknown fn or missing arg must FAIL the suite — the TypeError either
+    // would raise inside assert.throws would otherwise count as a rejection
     assert.ok(Object.hasOwn(fns, r.fn), `known reject fn '${r.fn}'`);
+    assert.ok(typeof r.args?.[0] === "string", `reject ${r.fn} has a string arg`);
     assert.throws(() => fns[r.fn](r.args[0]), `${r.fn}(${JSON.stringify(r.args[0])}) should reject`);
   }
 });
@@ -85,8 +86,9 @@ test("catalog vectors: empty day, INTEGER NORAD sort, duplicate reject", () => {
   assert.equal(contentHash([]), cat.empty_day_contentHash, "empty day");
   const recs = cat.unsorted_input.tles.map(([l1, l2]: [string, string]) => coreRecordFromTLE(l1, l2));
   assert.equal(contentHash(recs), cat.unsorted_input.contentHash, "int-sorted multi-record hash");
-  assert.throws(() => contentHash([...recs, recs[cat.reject_duplicate_norad.tles_repeat_index]]),
-    "duplicate NORAD must be a hard error");
+  const ri = cat.reject_duplicate_norad?.tles_repeat_index;
+  assert.ok(Number.isInteger(ri) && ri >= 0 && ri < recs.length, "tles_repeat_index in range");
+  assert.throws(() => contentHash([...recs, recs[ri]]), "duplicate NORAD must be a hard error");
 });
 
 test("merkle: roots, proofs (incl. promoted short path), degenerate + negative cases", () => {
@@ -114,8 +116,12 @@ test("merkle: roots, proofs (incl. promoted short path), degenerate + negative c
   // negative cases — a verifyProof that always returns true MUST fail here
   for (const rej of mk.reject) {
     if (rej.must_verify_false) {
+      // shape first: a malformed entry must fail loudly, not TypeError-as-pass
+      assert.ok(Number.isInteger(rej.proof_index) && rej.proof_index >= 0 && rej.proof_index < leaves.length
+        && Array.isArray(rej.proof), `${rej.comment}: well-formed entry`);
       assert.equal(verifyProof(leaves[rej.proof_index], rej.proof.map(parse32), root), false, rej.comment);
     } else if (rej.must_error) {
+      assert.ok(Array.isArray(rej.leaves), `${rej.comment}: well-formed entry`);
       assert.throws(() => merkleRoot(rej.leaves.map(parse32)), rej.comment);
     } else {
       assert.fail(`merkle reject (${rej.comment}): entry declares no expectation`);

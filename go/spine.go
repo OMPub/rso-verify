@@ -7,7 +7,6 @@ package rsoverify
 // chain" check: a third party derives the on-chain commitments from raw data.
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"strconv"
@@ -86,20 +85,21 @@ func lowerHex64(s string) bool {
 // hex, calendar-valid dates advancing by exactly one day, recordCount canonical.
 // Reject anything else — a malformed manifest MUST never yield anchors.
 func ParseManifest(path string) ([]ManifestDay, error) {
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
 	var days []ManifestDay
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	ln := 0
-	for sc.Scan() {
-		ln++
-		line := sc.Text()
+	// Raw split on LF — NOT bufio.ScanLines, which silently strips a trailing
+	// \r and made the Go client fail-open on CRLF manifests the SPEC (and the
+	// TS client) reject.
+	for ln0, line := range strings.Split(string(data), "\n") {
+		ln := ln0 + 1
 		if line == "" {
 			continue
+		}
+		if strings.ContainsRune(line, '\r') {
+			return nil, fmt.Errorf("manifest line %d: CR not allowed (SPEC §5: LF lines only)", ln)
 		}
 		if len(line) > 96 {
 			return nil, fmt.Errorf("manifest line %d: longer than 96 bytes", ln)
@@ -151,9 +151,6 @@ func ParseManifest(path string) ([]ManifestDay, error) {
 			return nil, fmt.Errorf("manifest line %d: bad recordCount: %w", ln, err)
 		}
 		days = append(days, ManifestDay{y, m, d, ch, rc})
-	}
-	if err := sc.Err(); err != nil {
-		return nil, err
 	}
 	return days, nil
 }

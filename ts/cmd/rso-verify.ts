@@ -28,7 +28,9 @@ function selftest(dir: string): void {
   if (hex(typeHash()) !== a.doc_block_typehash) throw new Error("typehash mismatch");
   if (hex(docChainId()) !== a.docChainId) throw new Error("docChainId mismatch");
 
-  if (a.keccak_empty && "0x" + toHex(keccak256(new Uint8Array(0))) !== a.keccak_empty) {
+  // REQUIRED vector class (SPEC §6): a missing keccak_empty must fail, not skip.
+  if (!a.keccak_empty) throw new Error("anchors.json: keccak_empty missing");
+  if ("0x" + toHex(keccak256(new Uint8Array(0))) !== a.keccak_empty) {
     throw new Error("keccak256(\"\") mismatch vs anchors.json keccak_empty");
   }
 
@@ -53,9 +55,10 @@ function selftest(dir: string): void {
     decode_satnum: decodeSatnum, epoch_from_tle: epochFromTLE,
   };
   for (const r of d.reject as Array<{ fn: string; args: string[] }>) {
-    // An unknown fn MUST fail the run — a typo'd vector must never count as a
-    // successful rejection (the TypeError-in-catch fail-open the audit found).
+    // An unknown fn or malformed entry MUST fail the run — a typo'd vector must
+    // never count as a successful rejection (the TypeError-in-catch fail-open).
     if (!Object.hasOwn(rejectFns, r.fn)) throw new Error(`unknown reject fn '${r.fn}'`);
+    if (typeof r.args?.[0] !== "string") throw new Error(`reject vector ${r.fn} has no string arg`);
     let rejected = false;
     try { rejectFns[r.fn](r.args[0]); } catch { rejected = true; }
     if (!rejected) throw new Error(`reject vector ${r.fn}(${JSON.stringify(r.args[0])}) was NOT rejected`);
@@ -79,7 +82,11 @@ function selftest(dir: string): void {
   }
   const leaves = mk.leaves.map(parse32);
   const root = merkleRoot(leaves);
+  const inRange = (i: unknown): i is number => Number.isInteger(i) && (i as number) >= 0 && (i as number) < leaves.length;
   if (toHex(root) !== mk.root.replace(/^0x/, "")) throw new Error("merkle root mismatch");
+  if (!inRange(mk.proof_index) || !inRange(mk.promoted_leaf_proof.proof_index)) {
+    throw new Error("merkle.json: proof_index out of range");
+  }
   if (!verifyProof(leaves[mk.proof_index], mk.proof.map(parse32), root)) throw new Error("merkle proof failed");
   if (toHex(merkleRoot(mk.single_leaf.leaves.map(parse32))) !== mk.single_leaf.root.replace(/^0x/, "")) {
     throw new Error("single-leaf root mismatch");
@@ -97,10 +104,16 @@ function selftest(dir: string): void {
   if (toHex(merkleRoot(seven)) !== mk.seven_leaves_root.root.replace(/^0x/, "")) throw new Error("seven-leaf root mismatch");
   for (const rej of mk.reject) {
     if (rej.must_verify_false) {
+      // validate shape BEFORE the throwing calls, so a malformed entry fails
+      // loudly instead of a TypeError being mistaken for the expected outcome
+      if (!inRange(rej.proof_index) || !Array.isArray(rej.proof)) {
+        throw new Error(`merkle reject (${rej.comment}): malformed entry`);
+      }
       if (verifyProof(leaves[rej.proof_index], rej.proof.map(parse32), root)) {
         throw new Error(`merkle reject (${rej.comment}): corrupted proof VERIFIED`);
       }
     } else if (rej.must_error) {
+      if (!Array.isArray(rej.leaves)) throw new Error(`merkle reject (${rej.comment}): malformed entry`);
       let errored = false;
       try { merkleRoot(rej.leaves.map(parse32)); } catch { errored = true; }
       if (!errored) throw new Error(`merkle reject (${rej.comment}): expected an error`);
@@ -117,8 +130,12 @@ function selftest(dir: string): void {
   if (contentHash([]) !== cat.empty_day_contentHash) throw new Error("empty-day contentHash mismatch");
   const catRecs = cat.unsorted_input.tles.map(([l1, l2]: [string, string]) => coreRecordFromTLE(l1, l2));
   if (contentHash(catRecs) !== cat.unsorted_input.contentHash) throw new Error("multi-record contentHash mismatch");
+  const ri = cat.reject_duplicate_norad?.tles_repeat_index;
+  if (!Number.isInteger(ri) || ri < 0 || ri >= catRecs.length) {
+    throw new Error("catalogs.json: tles_repeat_index out of range");
+  }
   let dupRejected = false;
-  try { contentHash([...catRecs, catRecs[cat.reject_duplicate_norad.tles_repeat_index]]); } catch { dupRejected = true; }
+  try { contentHash([...catRecs, catRecs[ri]]); } catch { dupRejected = true; }
   if (!dupRejected) throw new Error("duplicate-NORAD catalog was NOT rejected");
   console.log(`catalogs: empty day, ${catRecs.length}-record int-sorted hash, duplicate reject  OK`);
 

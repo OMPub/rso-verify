@@ -124,7 +124,9 @@ func CanonDecimal(s string) (string, error) {
 		if len(exp) > 0 && (exp[0] == '+' || exp[0] == '-') {
 			esign, exp = string(exp[0]), exp[1:]
 		}
-		if !asciiDigits(exp) || mant == "" {
+		if !asciiDigits(exp) || !strings.ContainsAny(mant, "0123456789") {
+			// the mantissa must contain at least one digit — ".e5" must not
+			// materialize zeros through the exponent shift
 			return "", fmt.Errorf("bad exponent form: %q", s)
 		}
 		ev, err := strconv.Atoi(esign + exp)
@@ -317,7 +319,15 @@ func renderEpoch(year, doy, usecOfDay int) (string, error) {
 }
 
 // EpochFromTLE renders the canonical EPOCH token from a TLE line-1 YYDDD.FFFFFFFF.
+// The §1.1 line check runs HERE too (not only in CoreRecordFromTLE): the epoch
+// window is located by byte offset, so a non-ASCII byte anywhere before it
+// would silently shift the slice differently in byte- vs UTF-16- vs code-point-
+// indexed implementations. Redundant for guarded callers, load-bearing for the
+// direct decoder surface the vectors exercise.
 func EpochFromTLE(line1 string) (string, error) {
+	if err := asciiTLELine(line1); err != nil {
+		return "", err
+	}
 	raw := stripASCII(pySlice(line1, 18, 32))
 	if len(raw) < 2 || !asciiDigits(raw[:2]) {
 		return "", fmt.Errorf("non-ASCII/invalid epoch year: %q", raw)

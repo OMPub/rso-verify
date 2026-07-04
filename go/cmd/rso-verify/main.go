@@ -87,8 +87,12 @@ func runSelftest(dir string) error {
 		return fmt.Errorf("docChainId mismatch vs anchors.json")
 	}
 
-	// keccak-256 padding self-check from the vectors (not hardcoded in clients only)
-	if anchors.KeccakEmpty != "" && "0x"+rv.Hex32(rv.Keccak256(nil)) != anchors.KeccakEmpty {
+	// keccak-256 padding self-check from the vectors — REQUIRED (a missing
+	// vector class is a conformance failure, SPEC §6)
+	if anchors.KeccakEmpty == "" {
+		return fmt.Errorf("anchors.json: keccak_empty missing")
+	}
+	if "0x"+rv.Hex32(rv.Keccak256(nil)) != anchors.KeccakEmpty {
 		return fmt.Errorf("keccak256(\"\") mismatch vs anchors.json keccak_empty")
 	}
 
@@ -160,6 +164,9 @@ func runSelftest(dir string) error {
 		len(dec.DecodeAssumedExp), len(dec.CanonDecimal), len(dec.DecodeSatnum), len(dec.EpochFromTLE))
 
 	for _, r := range dec.Reject {
+		if len(r.Args) == 0 {
+			return fmt.Errorf("reject vector %s has no args", r.Fn)
+		}
 		var e error
 		switch r.Fn {
 		case "canon_decimal":
@@ -270,6 +277,10 @@ func runSelftest(dir string) error {
 	if rv.Hex32(root) != strings.TrimPrefix(mk.Root, "0x") {
 		return fmt.Errorf("merkle root %s want %s", rv.Hex32(root), mk.Root)
 	}
+	inRange := func(i int) bool { return i >= 0 && i < len(leaves) }
+	if !inRange(mk.Index) || !inRange(mk.PromotedProof.Index) {
+		return fmt.Errorf("merkle.json: proof_index out of range")
+	}
 	proof, err := parseAll(mk.Proof)
 	if err != nil {
 		return err
@@ -324,6 +335,9 @@ func runSelftest(dir string) error {
 	for _, rej := range mk.Reject {
 		switch {
 		case rej.MustFalse:
+			if !inRange(rej.Index) {
+				return fmt.Errorf("merkle reject (%s): proof_index out of range", rej.Comment)
+			}
 			bp, err := parseAll(rej.Proof)
 			if err != nil {
 				return err
@@ -375,6 +389,9 @@ func runSelftest(dir string) error {
 	}
 	if ch, err := rv.ContentHash(catRecs); err != nil || ch != cat.UnsortedInput.ContentHash {
 		return fmt.Errorf("multi-record contentHash %s (%v) want %s", ch, err, cat.UnsortedInput.ContentHash)
+	}
+	if ri := cat.RejectDuplicate.RepeatIndex; ri < 0 || ri >= len(catRecs) {
+		return fmt.Errorf("catalogs.json: tles_repeat_index out of range")
 	}
 	dup := append(append([]rv.CoreRecord{}, catRecs...), catRecs[cat.RejectDuplicate.RepeatIndex])
 	if _, err := rv.ContentHash(dup); err == nil {
